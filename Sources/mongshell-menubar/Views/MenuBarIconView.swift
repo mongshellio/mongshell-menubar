@@ -9,7 +9,15 @@ struct MenuBarIconView: View {
     @ObservedObject var prefs: Preferences
     @ObservedObject var openClaw: OpenClawModel
 
-    @State private var pulsing = false
+    // `@State` 를 손으로 펼친 것. macOS 27 SDK 부터 `@State` 는 SwiftUIMacros
+    // 플러그인이 전개하는 매크로인데, 그 플러그인은 Xcode 에만 있고 Command Line
+    // Tools 에는 없다 (Decision #11-2). `State<Value>` 프로퍼티 래퍼 자체는 SDK 에
+    // 그대로 남아 있어, 매크로가 만들었을 저장소와 접근자를 직접 적으면 의미가 같다.
+    private var _pulsing = State(initialValue: false)
+    private var pulsing: Bool {
+        get { _pulsing.wrappedValue }
+        nonmutating set { _pulsing.wrappedValue = newValue }
+    }
 
     private var fiveHourUsed: Int { model.snapshot.fiveHourPercent }
     private var weeklyUsed: Int { model.snapshot.weeklyAllPercent }

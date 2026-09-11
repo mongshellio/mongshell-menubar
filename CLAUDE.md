@@ -42,6 +42,7 @@ macOS 메뉴바에 Claude 구독 사용량을 상시 표시하는 1인용 네이
 
 - **SwiftPM 테스트 타깃이 없는 것이 정상.** `swift test` 는 XCTest 나 swift-testing 을 요구하는데 둘 다 Command Line Tools 에 없다. 테스트는 [scripts/test.sh](scripts/test.sh) 가 실제 소스 파일을 직접 컴파일해 돌린다 (Decision #11-1).
 - **`swift run` 으로 바이너리를 직접 실행하면 크래시한다** — UserNotifications 가 앱 번들을 요구한다. 항상 `./scripts/make_app.sh` 로 `.app` 을 만들어 실행.
+- **뷰에서 `@State` 를 쓰지 않는다.** macOS 27 SDK 부터 `@State` 는 SwiftUIMacros 플러그인이 전개하는 매크로인데, 그 플러그인은 Xcode 에만 있고 Command Line Tools 에는 없다. 로컬 뷰 상태는 `State<Value>` 저장 프로퍼티를 손으로 펼쳐 쓴다 ([MenuBarIconView.swift](Sources/mongshell-menubar/Views/MenuBarIconView.swift) 참조, Decision #11-2).
 - **별도 lint 도구가 없다.** `swift build` 의 경고가 그 역할이며, 경고 0 을 유지한다.
 - **App Sandbox 미사용.** Keychain 의 Claude Code 자격증명 항목과 `openclaw` 셸아웃이 샌드박스와 양립하지 않는다.
 - **비공식 엔드포인트에 의존한다** — 스키마·헤더가 예고 없이 바뀔 수 있다는 전제로 디코딩이 의도적으로 관대하다 (Decision 2).
