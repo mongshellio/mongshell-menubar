@@ -11,6 +11,8 @@ non_goals:
 
 macOS 14+ 와 Xcode **또는** Command Line Tools 만 있으면 된다. 외부 패키지 의존성이 없어 `swift build` 가 네트워크를 타지 않는다.
 
+CLT 27.0 이상에서 `plugin for module 'SwiftUIMacros' not found` 가 나면 누군가 `@State` 를 새로 적은 것이다 — 수동 펼침으로 바꾼다 (Decision #11-2, `Views/CLAUDE.md`).
+
 ## 명령 요약
 
 | 목적 | 명령 |

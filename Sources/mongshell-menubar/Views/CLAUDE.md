@@ -19,6 +19,20 @@ non_goals:
 - 뷰 안에서 `URLSession`·`Process`·`FileManager`·Keychain 을 직접 부르지 않는다. 필요하면 모델에 메서드를 만들고 그것을 호출한다.
 - 사용자 액션은 모델 메서드 호출로 끝난다 (`refreshNow()`, `restart()` 등).
 
+## 뷰 로컬 상태는 `@State` 대신 수동 펼침
+
+`@State` 를 적지 않는다. macOS 27 SDK 부터 `@State` 는 SwiftUIMacros 플러그인이 전개하는 매크로이고, 그 플러그인은 Xcode 에만 들어 있어 Command Line Tools 빌드가 깨진다 (Decision #11-2). `State<Value>` 프로퍼티 래퍼 자체는 남아 있으므로 매크로가 만들었을 것을 직접 적는다 — `MenuBarIconView.pulsing` 이 본보기다:
+
+```swift
+private var _pulsing = State(initialValue: false)
+private var pulsing: Bool {
+    get { _pulsing.wrappedValue }
+    nonmutating set { _pulsing.wrappedValue = newValue }
+}
+```
+
+`@Binding`·`@ObservedObject`·`@StateObject`·`@Environment`·`@AppStorage` 는 여전히 프로퍼티 래퍼라 그대로 쓴다. `@Entry`·`@Animatable` 도 같은 플러그인을 요구하므로 쓰지 않는다.
+
 `App/AppDelegate.swift` 가 AppKit 호스트(`NSStatusItem`/`NSPopover`/설정 윈도우)를 소유한다. 팝오버의 생명주기·상호배타(hover ↔ 클릭)는 뷰가 아니라 AppDelegate 의 책임이다.
 
 ## 표면은 셋뿐이다
