@@ -52,7 +52,11 @@ struct OpenClawReading: Equatable, Sendable {
     /// Why the most recent request failed; cleared by the next success.
     private(set) var lastFailure: String?
 
+    /// Keeps `status` as the latest answer — unless it's older than the one we
+    /// have: polls can overlap (a manual refresh during a slow poll), and a
+    /// late reply must not roll the state back.
     mutating func recordSuccess(_ status: OpenClawStatus, receivedAt: Date) {
+        if let last = lastSuccess, status.checkedAt < last.checkedAt { return }
         if status.checkedAt != lastSuccess?.checkedAt {
             lastCheckedAt = min(status.checkedAt, receivedAt)
         }
@@ -92,20 +96,20 @@ struct OpenClawReading: Equatable, Sendable {
 ///
 /// The first response after launch (or after the URL changes) only sets the
 /// baseline — a heal from hours ago must not notify every time the app starts.
-/// After that, a `lastHeal.at` different from the last one seen is a new heal.
+/// After that, a `lastHeal.at` later than any seen so far is a new heal — an
+/// older one is a late reply from an overlapping poll, already announced.
 struct OpenClawHealWatch: Equatable, Sendable {
     private var hasBaseline = false
     private var lastSeenAt: Date?
 
-    /// Records `heal` and returns it when it's a new event since the previous
-    /// observation (nil otherwise). Returns a value so the caller decides
+    /// Records `heal` and returns it when it's later than every heal seen so
+    /// far (nil otherwise). Returns a value so the caller decides
     /// whether to notify — the command/query exception in code-standards.
     mutating func observe(_ heal: OpenClawHealEvent?) -> OpenClawHealEvent? {
-        defer {
-            hasBaseline = true
-            if let heal { lastSeenAt = heal.at }
-        }
-        guard hasBaseline, let heal, heal.at != lastSeenAt else { return nil }
-        return heal
+        let hadBaseline = hasBaseline
+        hasBaseline = true
+        guard let heal, heal.at > (lastSeenAt ?? .distantPast) else { return nil }
+        lastSeenAt = heal.at
+        return hadBaseline ? heal : nil
     }
 }
