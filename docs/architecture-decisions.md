@@ -152,7 +152,7 @@
   - 상태 URL 은 Preferences(UserDefaults) — 읽기 전용이고 `--rotate-token` 으로 폐기 가능하다. Keychain 규칙은 Claude 자격증명 대상이다.
   - 에이전트는 자기 자신을 kickstart 하지 않도록 게이트웨이 레이블을 설치 시 고정하고, 탐색에서 자기 레이블을 빼며, 명시 레이블이 자기 레이블이면 무시한다.
   - 옛 토큰 경로 해제(`--rotate-token`·uninstall)는 fail-closed 다 — 해제 후 serve 설정에 남아 있으면 중단한다.
-  - **단계적 적용**: 서버 에이전트·설치 스크립트가 먼저(#25), 앱 측 교체(원격 URL 읽기·`.unreachable`·로컬 셸아웃과 팝오버 동작 제거)는 후속 PR 이다. 그 사이 앱은 여전히 #4 방식으로 동작한다.
-  - **과도기 (후속 PR 전까지)**: 판정 규칙이 앱 `OpenClawService` 와 에이전트 `Probe` 두 벌이다. 규칙을 바꾸면 양쪽에 반영해야 한다. 공개 detail 필터는 에이전트 쪽에만 있다 (앱은 로컬 표시라 공개 경로가 없다).
+  - **단계적 적용 (완료)**: 서버 에이전트·설치 스크립트를 먼저 들이고, 이어서 앱 측을 교체했다 — 원격 URL 읽기(`OpenClawStatusClient`), `.unreachable`, 로컬 셸아웃(`OpenClawService`)과 팝오버 쓰기 동작 제거. 판정 규칙은 이제 에이전트 `Probe` 한 벌뿐이고, 앱은 JSON 을 읽어 표시만 한다. 두 타깃의 JSON 키 정합은 `Tests/OpenClawClientTests` 의 왕복 케이스(에이전트 인코더 → 앱 파서)가 지킨다.
+  - 앱 설정의 상태 URL 입력칸은 URL 이 없어도 보인다 — 원격 전제는 이 맥에서 감지할 수 없어 입력칸이 유일한 진입점이다. 그 밖의 openclaw 요소는 URL 이 적용된 뒤에만 나타난다.
 - **트레이드오프**: 서버에 오픈소스판 Tailscale(brew) 필요, 서버에서 CLT 빌드, 재부팅 후 자동 로그인 필요, 토큰이 경로에 있어 헤더보다 위생이 낮음, 외부 의존에 Tailscale Funnel 추가, 비표준 포트(8443)라 443 만 허용하는 네트워크에서는 읽을 수 없음.
 - **폐기 조건**: 서버가 App Store/Standalone 판 Tailscale 을 써야 하게 되면, 에이전트에 헤더 토큰 HTTP 리스너를 붙이고 포트 프록시로 전환한다.

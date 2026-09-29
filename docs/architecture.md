@@ -23,7 +23,7 @@ non_goals:
 | 설정 영속화 | `UserDefaults` (`@AppStorage`) |
 | 알림 | UserNotifications (앱 번들 필수) |
 | 로그인 항목 | ServiceManagement (`SMAppService.mainApp`) |
-| 외부 프로세스 | Foundation `Process` — `openclaw` CLI, `launchctl` (앱·서버 에이전트 공통) |
+| 외부 프로세스 | Foundation `Process` — `openclaw` CLI, `launchctl` (서버 에이전트 전용 — 메뉴바 앱은 셸아웃하지 않는다) |
 | 상태 공개 (서버 에이전트) | Tailscale Funnel — 오픈소스판 `tailscaled` 가 상태 파일을 정적 서빙 (포트 8443) |
 | 외부 패키지 의존성 | **없음** |
 
@@ -82,23 +82,23 @@ UsageModel.pollLoop()  ──(@MainActor, Task)
         └─ tailscale funnel --https=8443 --set-path=/<토큰>
              → https://<서버 DNS 이름>:8443/<토큰>
 
-[맥북] 메뉴바 앱  ── HTTPS GET 으로 읽기만   ← 앱 측 전환은 후속 PR
+[맥북] 메뉴바 앱  OpenClawModel ──(주기 폴링, 기본 60초 · 최소 15초)
+   └─ OpenClawStatusClient → HTTPS GET (ephemeral 세션, 캐시 무시, 타임아웃 10초)
+        └─ 관대한 디코딩 → OpenClawReading (마지막 성공 응답 보관)
+             └─ OpenClawHealth: 🟢 ok / 🟡 degraded / 🔴 down(서버 보고) / ⚪️ unreachable
+   └─ lastHeal.at 변화 → "openclaw 자동 재시작됨 (서버)" 알림 (첫 응답은 기준점)
 ```
 
 - 게이트웨이 레이블은 설치 시 고정한다(`--gateway-label`). 에이전트 자신의 레이블은 탐색·명시 모두에서 제외된다.
 - 재시작 후에도 `status.json` 의 `lastHeal` 로 복구 쿨다운을 이어받는다.
 - 설치·제거는 `server/install.sh` / `server/uninstall.sh` (사용법: [server/README.md](../server/README.md)).
 
-**현행 로컬 경로 (앱, 후속 PR 에서 제거 예정).** 앱 측 전환 전까지 메뉴바 앱은 아래 로컬 셸아웃으로 동작한다.
+- **연락 두절(회색)** 판정은 마지막 **성공** 응답의 `checkedAt` 이 `max(180초, 3×intervalSeconds)` 를 넘었는가 하나다. 일시적 요청 실패는 마지막 성공이 신선한 동안 상태를 바꾸지 않는다. 빨강은 서버가 게이트웨이 다운을 보고했을 때만 — 맥북 오프라인이 오경보가 되지 않게.
+- `checkedAt` 이 없거나 해석 불가한 문서는 신선도를 증명할 수 없어 실패로 취급한다. 미래 시각(시계 오차)은 수신 시각으로 잘라 나이 0 으로 본다.
+- HTTP 404 는 연락 두절이되 "주소 또는 토큰이 맞지 않습니다" 로 구분한다. 에러 문구에 URL(=토큰)을 넣지 않는다.
+- 앱은 읽기 전용이다 — 재시작·자동복구·로그는 서버 몫이다.
 
-```
-OpenClawModel  ──(주기 폴링, 백그라운드)
-   └─ OpenClawService → Process: `openclaw channels status --probe`
-        └─ 파싱 → OpenClawHealth (🟢 정상 / 🟡 채널 워커 사망 / 🔴 게이트웨이 사망)
-   └─ 자동복구: 2회 연속 실패 + 쿨다운 600초 → launchctl 하드 재시작
-```
-
-`openclaw` 가 설치돼 있지 않거나 사용자가 `Claude만` 을 고르면 이 경로 전체가 비활성이며 UI 에 아무 흔적도 남지 않는다. 과도기 동안 판정 규칙은 앱 `OpenClawService` 와 에이전트 `Probe` 두 벌이다.
+상태 URL 이 없거나 사용자가 `Claude만` 을 고르면 메뉴바·팝오버·알림에 아무 흔적도 남지 않는다 (`Preferences.showsOpenClaw`). 설정의 URL 입력칸만은 진입점이라 항상 보인다.
 
 ## Auth
 
@@ -118,7 +118,7 @@ Claude Code 사용자는 로그인 없이 기존 토큰을 재사용한다. 다�
 
 **인증 경계**: 토큰은 Keychain 에만 저장되고 `api.anthropic.com` / `platform.claude.com` 외 어디에도 전송되지 않는다. 텔레메트리·크래시 리포터가 없다.
 
-**openclaw 상태 URL** (서버 에이전트): 경로의 토큰(32자리 hex)이 유일한 접근 통제인 읽기 전용 capability URL 이다. Claude 자격증명과 무관하며, `server/install.sh --rotate-token` 으로 폐기·재발급한다.
+**openclaw 상태 URL** (서버 에이전트): 경로의 토큰(32자리 hex)이 유일한 접근 통제인 읽기 전용 capability URL 이다. Claude 자격증명과 무관하며, `server/install.sh --rotate-token` 으로 폐기·재발급한다. 앱은 이것을 Keychain 이 아니라 `Preferences`(UserDefaults)에 두고, https 만 받는다.
 
 ## Infrastructure
 
@@ -130,7 +130,7 @@ Claude Code 사용자는 로그인 없이 기존 토큰을 재사용한다. 다�
 | 지인 공유 | `scripts/release.sh` | Developer ID + 공증 | `.dmg` 배포 (Gatekeeper 통과, 업데이트 후 토큰 유지) |
 | 서버 에이전트 | `server/install.sh` | 없음 (서버 맥에서 release 빌드) | openclaw 감시 에이전트 LaunchAgent 등록 + Tailscale Funnel 공개 (8443) |
 
-- **App Sandbox 미사용** — Keychain 의 타 앱 항목 접근과 `openclaw`/`launchctl` 셸아웃이 샌드박스와 양립하지 않는다.
+- **App Sandbox 미사용** — Keychain 의 타 앱 항목(Claude Code 자격증명) 접근이 샌드박스와 양립하지 않는다. (openclaw 는 이제 HTTPS 읽기라 샌드박스 사유가 아니다.)
 - 버전 SSOT 는 git tag (`v1.0.0`, `v1.0.1` …) 이며 GitHub Releases 가 배포 채널이다.
 - 외부 SaaS 의존은 Anthropic 호스트다. openclaw 원격 감시를 쓰면 Tailscale(Funnel)이 추가된다.
 

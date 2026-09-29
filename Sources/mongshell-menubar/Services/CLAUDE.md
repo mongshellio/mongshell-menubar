@@ -22,7 +22,7 @@ non_goals:
 | 사용량 API | `UsageAPIClient` |
 | OAuth 흐름 | `AuthService`, `LoopbackServer` |
 | 사용자 설정 파일 | `ClaudeSettingsStore` |
-| 외부 CLI (`openclaw`, `launchctl`) | `OpenClawService` |
+| openclaw 서버 상태 URL (HTTPS 읽기 전용) | `OpenClawStatusClient` |
 | 로그인 항목 (ServiceManagement) | `LoginItemService` |
 
 `TimeText` 는 외부 경계가 아니라 포맷터다 — 위 타입들과 성격이 다르지만, 표시 문자열의 SSOT 을 한 곳에 두려고 여기 있다. 이 예외를 늘리지 않는다.
@@ -56,6 +56,8 @@ non_goals:
 
 ## 프로세스 실행
 
+현재 앱에는 외부 프로세스 실행이 없다 (openclaw 셸아웃은 서버 에이전트로 옮겨갔다 — Decision #25). 다시 생기면 아래를 지킨다.
+
 - **타임아웃 없는 `Process` 실행 금지.** 외부 CLI 가 매달리면 폴링 루프 전체가 멈춘다.
 - 메인 스레드에서 기다리지 않는다.
 - 인자는 배열로 넘긴다 — 셸 문자열을 조립하지 않는다.
@@ -68,6 +70,8 @@ non_goals:
 - 중지 이후에 소스가 설치되지 않도록 순서를 지킨다.
 
 ## 자격증명
+
+Claude 자격증명(OAuth 토큰)이 대상이다. openclaw 상태 URL 은 읽기 전용 capability URL 이라 `Preferences`(UserDefaults)에 두되, URL 이 곧 토큰이므로 로그·에러 문구에 넣지 않는다 (Decision #25).
 
 - 토큰은 Keychain 에만 둔다. `UserDefaults`·파일·로그 어디에도 쓰지 않는다.
 - Anthropic 호스트 외 어디에도 전송하지 않는다.

@@ -8,14 +8,13 @@ enum ProbeVerdict: Equatable {
     case down
     /// No openclaw binary at any known path. Kept distinct from `.down` because
     /// restarting the gateway can't fix a missing install — the heal tracker
-    /// treats it as a non-failure, exactly like the app's `.notInstalled`.
+    /// treats it as a non-failure. Reported to clients as `down` (see StatusFile).
     case notInstalled
 }
 
-/// Copied from the app's `OpenClawService` (run / probe / parse) so the server
-/// agent judges health by the identical rules. The app keeps its own copy until
-/// PR-B switches it to reading this agent's status file; until then, a rule
-/// change must land in both places.
+/// The single home of the openclaw health rules (Decision #25). Originally
+/// ported from the app's local probe; the app now only reads the verdict this
+/// agent publishes, so a rule change lands here alone.
 enum Probe {
     /// launchd hands the agent a minimal PATH, so we never trust `which` — we
     /// probe these absolute candidates in order.
