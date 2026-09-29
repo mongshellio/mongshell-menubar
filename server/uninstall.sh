@@ -41,7 +41,9 @@ if [[ -s "$TOKEN_FILE" ]]; then TOKEN="$(tr -d '[:space:]' <"$TOKEN_FILE")"; fi
 if [[ -z "$TOKEN" ]]; then
   echo "  (토큰 파일 없음 — 건너뜀)"
 elif ! pgrep -x tailscaled >/dev/null; then
-  echo "  (tailscaled 가 돌고 있지 않음 — 공개 중인 경로 없음)"
+  # --bg 로 저장한 funnel 설정은 데몬이 다시 뜨면 되살아난다. 지금 해제하지 못하면
+  # 토큰 파일이 남아 있어야 나중에 같은 경로를 찾아 끌 수 있다.
+  die "tailscaled 가 돌고 있지 않아 funnel 경로를 해제할 수 없습니다 (저장된 공개 설정은 데몬 재기동 시 되살아납니다). tailscaled 를 켠 뒤 다시 실행하세요."
 else
   TAILSCALE="$(command -v tailscale || true)"
   [[ -n "$TAILSCALE" ]] \
