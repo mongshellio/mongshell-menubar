@@ -75,7 +75,7 @@ struct OpenClawStatusClient: Sendable {
         config.urlCache = nil
         config.timeoutIntervalForRequest = requestTimeout
         config.timeoutIntervalForResource = requestTimeout
-        return URLSession(configuration: config)
+        return URLSession(configuration: config, delegate: RedirectRefuser(), delegateQueue: nil)
     }()
 
     // MARK: URL
@@ -116,6 +116,9 @@ struct OpenClawStatusClient: Sendable {
             throw .network
         }
         guard let http = response as? HTTPURLResponse else { throw .badResponse }
+        // Redirects are refused, so an answer from another host means something
+        // between us and the agent rewrote the request — don't trust it.
+        guard http.url?.host?.lowercased() == url.host?.lowercased() else { throw .badResponse }
         return try Self.interpret(statusCode: http.statusCode, data: data)
     }
 
@@ -201,5 +204,17 @@ struct OpenClawStatusClient: Sendable {
         let withFrac = ISO8601DateFormatter()
         withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return withFrac.date(from: s) ?? ISO8601DateFormatter().date(from: s)
+    }
+}
+
+/// Refuses every redirect. The agent serves one file at one address, so a 3xx
+/// is either a misconfiguration or something steering the token-bearing
+/// request elsewhere. Returning nil hands the 3xx back as the response, which
+/// `interpret` reports as `.http(code)`.
+private final class RedirectRefuser: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? {
+        nil
     }
 }
