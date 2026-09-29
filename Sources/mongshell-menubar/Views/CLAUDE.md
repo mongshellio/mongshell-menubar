@@ -68,4 +68,4 @@ UI 를 추가·변경하면 `App/SnapshotRenderer.swift` 의 렌더 목록에 �
 
 ## 선택 기능의 비가시성
 
-openclaw·Claude Code 설정처럼 전제가 없을 수 있는 요소는 **비활성 회색 표시가 아니라 아예 렌더하지 않는다** (PHILOSOPHY 원칙 2 / Decision #25). `if` 로 분기하되 자리(spacer·구분선)를 남기지 않는다. 예외는 전제를 만드는 입력 자체 — openclaw 상태 URL 입력칸은 원격 서버를 감지할 수 없어 항상 보인다.
+openclaw·Claude Code 설정처럼 전제가 없을 수 있는 요소는 **비활성 회색 표시가 아니라 아예 렌더하지 않는다** (PHILOSOPHY 원칙 2 / Decision #25). `if` 로 분기하되 자리(spacer·구분선)를 남기지 않는다. 설정 진입점 예외는 PHILOSOPHY 원칙 2 를 따른다 — 현재 해당하는 것은 `OpenClawSettingsSection` 의 상태 URL 입력칸뿐이다.

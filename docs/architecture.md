@@ -98,7 +98,7 @@ UsageModel.pollLoop()  ──(@MainActor, Task)
 - HTTP 404 는 연락 두절이되 "주소 또는 토큰이 맞지 않습니다" 로 구분한다. 에러 문구에 URL(=토큰)을 넣지 않는다.
 - 앱은 읽기 전용이다 — 재시작·자동복구·로그는 서버 몫이다.
 
-상태 URL 이 없거나 사용자가 `Claude만` 을 고르면 메뉴바·팝오버·알림에 아무 흔적도 남지 않는다 (`Preferences.showsOpenClaw`). 설정의 URL 입력칸만은 진입점이라 항상 보인다.
+상태 URL 이 없거나 사용자가 `Claude만` 을 고르면 메뉴바·팝오버·알림에 아무 흔적도 남지 않는다 (`Preferences.showsOpenClaw`). 설정의 URL 입력칸은 PHILOSOPHY 원칙 2 의 설정 진입점 예외로 항상 보인다.
 
 ## Auth
 
