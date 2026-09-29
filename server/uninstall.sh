@@ -29,7 +29,7 @@ step() { printf '▶ %s\n' "$*"; }
 
 if [[ $ASSUME_YES -eq 0 ]]; then
   printf '에이전트를 내리고 funnel 경로와 데이터 폴더(토큰 포함)를 삭제합니다.\n  %s\n계속할까요? [y/N] ' "$DATA_DIR"
-  read -r answer
+  read -r answer || answer=""
   if [[ ! "$answer" =~ ^[Yy]$ ]]; then echo "취소했습니다."; exit 0; fi
 fi
 
