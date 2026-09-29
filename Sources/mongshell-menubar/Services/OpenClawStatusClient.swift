@@ -183,7 +183,10 @@ struct OpenClawStatusClient: Sendable {
     }
 
     private static func positiveInt(_ any: Any?) -> Int? {
-        guard let number = any as? NSNumber else { return nil }
+        // JSONSerialization hands `true` back as an NSNumber worth 1 — a bool
+        // is not an interval.
+        guard let number = any as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
         let value = number.doubleValue
         // Bounded so `3 × interval` can't overflow downstream.
         guard value.isFinite, value > 0, value < Double(Int32.max) else { return nil }
