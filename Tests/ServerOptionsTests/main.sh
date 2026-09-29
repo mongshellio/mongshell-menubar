@@ -63,6 +63,14 @@ check "앞자리 0 은 10진수 (045 → 45)"     "45 1 0" "$(resolve 'interval=
 check "끝줄 개행 없어도 읽음"             "30 0 0" "$(resolve 'interval=30\nauto_heal=0' "" "")"
 check "모르는 키 무시"                    "30 1 0" "$(resolve 'foo=bar\ninterval=30\n' "" "")"
 
+printf 'interval=30\n' >"$OPTS"; chmod 000 "$OPTS"
+ARG_INTERVAL="" ARG_AUTO_HEAL=""
+load_saved_options "$OPTS" 2>"$WORK/err"; status=$?
+resolve_options
+check "읽을 수 없는 파일 → 기본값 + 경고, 중단 없음" "60 1 1 0" \
+  "$INTERVAL $AUTO_HEAL $([[ -s "$WORK/err" ]] && echo 1 || echo 0) $status"
+chmod 600 "$OPTS"
+
 rm -f "$WORK/pwned"
 resolve "interval=\$(touch $WORK/pwned)\n" "" "" >/dev/null
 check "파일 내용을 실행하지 않음" "absent" "$([[ -e "$WORK/pwned" ]] && echo present || echo absent)"

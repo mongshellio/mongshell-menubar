@@ -56,7 +56,11 @@ EOF
 # 반쯤 쓰인 파일이 남지 않게 한다.
 save_options() {
   local tmp="$1.tmp.$$"
-  printf 'interval=%s\nauto_heal=%s\n' "$2" "$3" >"$tmp" && mv -f "$tmp" "$1"
+  if printf 'interval=%s\nauto_heal=%s\n' "$2" "$3" >"$tmp" && mv -f "$tmp" "$1"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
 }
 
 while [[ $# -gt 0 ]]; do

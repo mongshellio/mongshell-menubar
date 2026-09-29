@@ -91,6 +91,10 @@ load_saved_options() {
   SAVED_INTERVAL=""
   SAVED_AUTO_HEAL=""
   [[ -f "$1" ]] || return 0
+  if [[ ! -r "$1" ]]; then
+    warn "저장된 설치 옵션을 읽을 수 없어 기본값을 씁니다: $1"
+    return 0
+  fi
   local key value
   while IFS='=' read -r key value || [[ -n "$key" ]]; do
     case "$key" in
