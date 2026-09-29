@@ -86,7 +86,7 @@ do {
     } else { check("checkedAt 해석 불가 → 실패", false) }
 
     var r = OpenClawReading()
-    r.recordFailure(OpenClawStatusError.missingCheckedAt.detail)
+    r.recordFailure(.missingCheckedAt)
     check("checkedAt 누락 → unreachable",
           r.health(now: now) == .unreachable(detail: "상태 파일에 확인 시각이 없습니다"),
           "\(r.health(now: now))")
@@ -121,7 +121,7 @@ do {
     }
     check("404 → notFound", interpret(404) == .notFound)
     var r = OpenClawReading()
-    r.recordFailure(OpenClawStatusError.notFound.detail)
+    r.recordFailure(.notFound)
     check("404 → unreachable + 토큰 문구",
           r.health(now: now) == .unreachable(detail: "주소 또는 토큰이 맞지 않습니다"))
     check("500 → http(500)", interpret(500) == .http(500))
@@ -153,7 +153,7 @@ do {
     let down = reading(checkedSecondsAgo: 10, now: now, health: .down).health(now: now)
     check("서버가 down 보고 → down (빨강)", down == .down)
     var gone = OpenClawReading()
-    gone.recordFailure(OpenClawStatusError.offline.detail)
+    gone.recordFailure(.offline)
     let offline = gone.health(now: now)
     check("응답 없음 → down 이 아니라 unreachable",
           offline == .unreachable(detail: "네트워크 연결 없음"), "\(offline)")
@@ -161,7 +161,7 @@ do {
           OpenClawHealth.unreachable(detail: "").dotColor != OpenClawHealth.down.dotColor)
 
     var blip = reading(checkedSecondsAgo: 30, now: now)
-    blip.recordFailure(OpenClawStatusError.timedOut.detail)
+    blip.recordFailure(.timedOut)
     check("일시 실패 + 신선한 마지막 성공 → 상태 유지",
           blip.health(now: now) == .ok(detail: "Telegram default"), "\(blip.health(now: now))")
     let later = blip.health(now: now.addingTimeInterval(200))

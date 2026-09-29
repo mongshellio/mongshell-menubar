@@ -50,8 +50,11 @@ struct OpenClawReading: Equatable, Sendable {
         lastFailure = nil
     }
 
-    mutating func recordFailure(_ reason: String) {
-        lastFailure = reason
+    /// Remembers why the latest request failed. A cancellation is ignored: we
+    /// dropped that request ourselves, so it says nothing about the server.
+    mutating func recordFailure(_ error: OpenClawStatusError) {
+        guard error != .cancelled else { return }
+        lastFailure = error.detail
     }
 
     /// `max(180s, 3 × interval)`.

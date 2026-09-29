@@ -97,16 +97,17 @@ final class OpenClawModel: ObservableObject {
         } catch {
             outcome = .failure(error)
         }
-        // The URL may have been changed or cleared while the request was in
-        // flight — its answer is about a server we no longer watch.
-        guard url == Preferences.shared.openClawStatusURLValue else { return }
+        // A cancelled poll belongs to a loop that has been replaced, and the
+        // URL may have been changed or cleared while the request was in flight
+        // — either way its answer is not news about the server we watch now.
+        guard !Task.isCancelled, url == Preferences.shared.openClawStatusURLValue else { return }
 
         switch outcome {
         case .success(let status):
             reading.recordSuccess(status)
             if let heal = healWatch.observe(status.lastHeal) { notifyHeal(heal) }
         case .failure(let error):
-            reading.recordFailure(error.detail)
+            reading.recordFailure(error)
         }
         health = reading.health(now: Date())
     }

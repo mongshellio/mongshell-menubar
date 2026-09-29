@@ -140,7 +140,7 @@ private extension OpenClawReading {
         reading.recordSuccess(OpenClawStatus(
             checkedAt: now.addingTimeInterval(-23 * 60), health: .ok(detail: "Telegram default"),
             intervalSeconds: 60, autoHeal: true, lastHeal: nil))
-        reading.recordFailure(OpenClawStatusError.offline.detail)
+        reading.recordFailure(.offline)
         return reading
     }
 }

@@ -15,6 +15,9 @@ enum OpenClawStatusError: Error, Equatable, Sendable {
     case badResponse
     /// No usable `checkedAt` — the document can't vouch for its own freshness.
     case missingCheckedAt
+    /// The request was cancelled on our side (the poll loop was replaced). Not
+    /// a fact about the server, so `OpenClawReading` never records it.
+    case cancelled
 
     var detail: String {
         switch self {
@@ -25,6 +28,19 @@ enum OpenClawStatusError: Error, Equatable, Sendable {
         case .network:          return "서버에 연결할 수 없습니다"
         case .badResponse:      return "상태 파일을 읽을 수 없습니다"
         case .missingCheckedAt: return "상태 파일에 확인 시각이 없습니다"
+        case .cancelled:        return "요청 취소됨"
+        }
+    }
+
+    /// Transport failure → error. Fixed strings only: URLError's own
+    /// description embeds the URL.
+    static func transport(_ code: URLError.Code) -> OpenClawStatusError {
+        switch code {
+        case .cancelled: return .cancelled
+        case .timedOut:  return .timedOut
+        case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
+            return .offline
+        default:         return .network
         }
     }
 }
@@ -90,13 +106,9 @@ struct OpenClawStatusClient: Sendable {
         do {
             (data, response) = try await Self.session.data(for: req)
         } catch let error as URLError {
-            // Map to fixed strings: URLError's own description embeds the URL.
-            switch error.code {
-            case .timedOut: throw .timedOut
-            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
-                throw .offline
-            default: throw .network
-            }
+            throw .transport(error.code)
+        } catch is CancellationError {
+            throw .cancelled
         } catch {
             throw .network
         }
