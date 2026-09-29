@@ -7,13 +7,28 @@
 # 경로만 이 포트에 따로 둔다 (funnel 허용 포트: 443·8443·10000).
 FUNNEL_PORT=8443
 
+# 설정이 비었을 때 'serve status --json' 이 JSON 대신 내놓을 수 있는 문구.
+# 실기 미확인 가정: 빈 설정에서 빈 출력이나 "No serve config" 류 텍스트가 나올 수
+# 있다고 보고 대비한다. 여기 없는 비-JSON 은 설정 존재를 숨길 수 있으니 실패로 둔다.
+SERVE_EMPTY_PATTERN='^no serve config'
+# 해석 실패 시 에러에 보여줄 원문 길이(바이트).
+SERVE_EXCERPT_BYTES=200
+
 # $1=tailscale CLI, $2="<DNS 이름>:<포트>"
 # 그 포트에 걸린 serve/funnel 핸들러를 한 줄에 하나씩 출력한다 — 웹 경로는 "/…",
 # TCP 포워딩은 "tcp:…". 설정을 읽거나 해석하지 못하면 비0 으로 끝난다
 # (호출자는 fail-closed 로 다룬다).
 serve_handlers() {
-  local json
+  local json trimmed
   json="$("$1" serve status --json 2>/dev/null)" || return 1
+  trimmed="$(tr -d '[:space:]' <<<"$json")"
+  [[ -n "$trimmed" ]] || return 0
+  if [[ "${trimmed:0:1}" != "{" ]]; then
+    if grep -qiE -- "$SERVE_EMPTY_PATTERN" <<<"$json"; then return 0; fi
+    printf "'tailscale serve status --json' 출력이 JSON 이 아닙니다: %s\n" \
+      "$(head -c "$SERVE_EXCERPT_BYTES" <<<"$json")" >&2
+    return 1
+  fi
   /usr/bin/osascript -l JavaScript - "$json" "$2" <<'JS'
 function run(argv) {
   var cfg = argv[0] ? JSON.parse(argv[0]) : {};
