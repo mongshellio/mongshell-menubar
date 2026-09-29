@@ -40,7 +40,7 @@ final class ClaudeSettingsModel: ObservableObject {
     // MARK: Lifecycle
 
     /// Loads the file and starts watching it. A no-op when Claude Code isn't
-    /// installed, mirroring how `OpenClawModel` parks without openclaw.
+    /// installed, mirroring how `OpenClawModel` parks without a status URL.
     func start() {
         // Tear down any previous watch first, mirroring `OpenClawModel.start()`.
         watcher?.stop()

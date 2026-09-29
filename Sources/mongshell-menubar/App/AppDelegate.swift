@@ -109,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         resizeStatusItem()
         model.start()
 
-        // No-op internally if openclaw isn't installed.
+        // Parks in .notConfigured (no polling) when no status URL is set.
         openClaw.start()
 
         // Loads ~/.claude/settings.json and watches it, so the settings window

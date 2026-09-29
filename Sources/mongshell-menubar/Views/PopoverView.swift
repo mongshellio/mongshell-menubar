@@ -60,23 +60,7 @@ struct PopoverView: View {
                     .foregroundStyle(Palette.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let pid = openClaw.pid {
-                Text("PID \(pid)")
-                    .font(.system(size: 11))
-                    .monospacedDigit()
-                    .foregroundStyle(Palette.textTertiary)
-            }
-
-            VStack(spacing: 8) {
-                HStack(spacing: 8) {
-                    Button("새로고침") { openClaw.refreshNow() }
-                    Button("지금 재시작") { openClaw.hardRestart() }
-                }
-                HStack(spacing: 8) {
-                    Button("대시보드 열기") { openClaw.openDashboard() }
-                    Button("로그 열기") { openClaw.openLog() }
-                }
-            }
+            Button("새로고침") { openClaw.refreshNow() }
             .buttonStyle(.bordered)
             .controlSize(.small)
             .frame(maxWidth: .infinity)

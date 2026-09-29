@@ -2,7 +2,7 @@ import Foundation
 
 /// All I/O against Claude Code's user-scope settings file
 /// (`~/.claude/settings.json`) lives here, isolated from the model the same way
-/// `OpenClawService` isolates the gateway shell-outs.
+/// `OpenClawStatusClient` isolates the openclaw status-URL reads.
 ///
 /// That file — not UserDefaults — is the single source of truth for these
 /// values. Claude Code watches it and hot-reloads, so a save here lands in an

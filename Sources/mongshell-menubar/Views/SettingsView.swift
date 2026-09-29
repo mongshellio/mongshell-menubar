@@ -80,7 +80,7 @@ struct SettingsView: View {
     /// openclaw controls. When openclaw isn't installed, the picker is locked
     /// to `Claude만` and everything else is hidden behind an explanatory note.
     @ViewBuilder private var openClawSection: some View {
-        let installed = OpenClawService.isInstalled
+        let installed = prefs.openClawStatusURLValue != nil
 
         Picker("메뉴바 표시", selection: $prefs.menuBarTargetRaw) {
             ForEach(MenuBarTarget.allCases, id: \.rawValue) { target in
@@ -103,9 +103,6 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-
-            Toggle("먹통 감지 시 자동 재시작", isOn: $prefs.openClawAutoHeal)
-                .disabled(prefs.menuBarTarget == .claudeOnly)
 
             Picker("openclaw 확인 간격", selection: $prefs.openClawPollSeconds) {
                 ForEach(openClawIntervals, id: \.self) { s in
