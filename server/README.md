@@ -2,7 +2,7 @@
 
 openclaw 게이트웨이가 24시간 도는 **서버 맥**에 설치하는 감시 에이전트의 설치·운영 절차. 새 서버 맥에서 **위에서 아래로 그대로 따라 하면** 설치부터 맥북 연결까지 끝나도록 썼다. 설계 사양(데이터 흐름·판정 규칙·보안 경계)은 [docs/architecture.md § 3. openclaw 상태](../docs/architecture.md#3-openclaw-상태-선택-경로), 결정 배경은 [Decision #25](../docs/architecture-decisions.md) 가 권위다. 이 문서는 절차만 다룬다.
 
-> **실기 검증 전.** `install.sh` / `uninstall.sh` 는 Tailscale 이 없는 개발 맥에서 작성돼 서버 맥 실기 확인을 아직 거치지 않았다. 스크립트가 기대와 다르게 동작할 수 있는 지점을 [6. 첫 설치 때 확인할 것](#6-첫-설치-때-확인할-것-실기-미검증-가정) 에 모아 두었다. 막히면 그 절의 **보고용 정보 수집** 명령으로 상태를 모은다.
+> **실기 검증은 일부만.** 2026-09-29 첫 설치(macOS 27, tailscale 1.102.4)에서 `install.sh` 는 funnel 설정 직전까지 통과했고, funnel 설정은 같은 명령을 sudo 로 손으로 실행해 확인했다. 그 결과로 `install.sh` 가 sudo 를 쓰게 고쳤지만, **고친 스크립트를 처음부터 끝까지 돌린 확인은 아직 없다.** 토큰 교체·제거(`--rotate-token`, `uninstall.sh`)와 데몬 재시작 뒤 동작도 확인하지 못했다. 가정별 확인 여부는 [6. 첫 설치 때 확인할 것](#6-첫-설치-때-확인할-것-실기-미검증-가정) 에 있다. 막히면 그 절의 **보고용 정보 수집** 명령으로 상태를 모은다.
 
 ## 목차
 
@@ -45,7 +45,7 @@ openclaw 게이트웨이가 24시간 도는 **서버 맥**에 설치하는 감�
 ## 1. 준비물 체크리스트
 
 - [ ] **Tailscale 계정** — 관리 콘솔(https://login.tailscale.com/admin) 에서 정책 파일을 고칠 수 있는 관리자(Admin/Owner) 권한
-- [ ] **서버 맥 관리자 권한** — `sudo` 가 필요한 단계가 있다 (tailscaled 데몬, operator, pmset)
+- [ ] **서버 맥 관리자 권한** — `sudo` 가 필요한 단계가 있다 (tailscaled 데몬, operator, pmset, `install.sh` 의 funnel 설정)
 - [ ] **openclaw 가 서버 맥에서 이미 launchd 로 돌고 있을 것**, 그리고 아래 두 조건을 만족할 것 (에이전트가 이 경로·위치만 본다)
   - 바이너리가 `/opt/homebrew/bin/openclaw` 또는 `/usr/local/bin/openclaw` 에 있다
   - 게이트웨이가 **에이전트를 설치할 같은 사용자**의 `~/Library/LaunchAgents/` 에 plist 로 등록돼 있고, 파일 이름에 `claw` 가 들어 있다 (openclaw 기본 레이블: `ai.openclaw.gateway`)
@@ -94,7 +94,7 @@ App Store/Standalone 판 앱이 아니라 **brew formula** 를 쓴다 — `insta
   ```
   성공: `앱 판 없음`.
 
-- [ ] **설치·데몬 시작·operator·로그인** — operator 를 로그인과 함께 준다. 일반 사용자로 `tailscale funnel` 을 쓰려면 필요하고, 로그인 전에 주면 이후 `tailscale` 명령을 sudo 없이 쓸 수 있다.
+- [ ] **설치·데몬 시작·operator·로그인** — operator 를 로그인과 함께 준다. operator 를 주면 `tailscale status`·`tailscale serve status` 를 sudo 없이 쓸 수 있다. 파일을 서빙하는 funnel 설정은 operator 로도 거부돼 `install.sh` 가 그 명령을 sudo 로 실행한다 ([E](#e-serverinstallsh-실행)). 경로 해제가 sudo 없이 되는지는 아직 확인하지 못했다 ([6](#6-첫-설치-때-확인할-것-실기-미검증-가정) 가정 6).
   ```bash
   brew install tailscale
   sudo brew services start tailscale   # tailscaled 를 root 데몬으로 상시 실행
@@ -107,7 +107,7 @@ App Store/Standalone 판 앱이 아니라 **brew formula** 를 쓴다 — `insta
   ```
   안 되면: → [5-1](#5-1-installsh--uninstallsh-메시지별) `tailscaled 데몬이 돌고 있지 않습니다` / `Tailscale 상태가 Running 이 아닙니다`
 
-  이미 로그인한 기기라면 operator 만 따로 준다: `sudo tailscale set --operator=$USER` (성공하면 출력 없음). operator 가 없으면 E 단계에서 `tailscale funnel 설정 실패` 가 난다.
+  이미 로그인한 기기라면 operator 만 따로 준다: `sudo tailscale set --operator=$USER` (성공하면 출력 없음).
 
 ### C. Tailscale 관리 콘솔
 
@@ -162,6 +162,7 @@ tailscale status --json | plutil -extract Self.Tags json -o - -     # → ["tag:
   ```bash
   server/install.sh 2>&1 | tee ~/openclaw-install.log   # 또는 그냥 server/install.sh
   ```
+  `▶ tailscale funnel 설정` 단계에서 **맥 로그인 비밀번호**를 물을 수 있다 (sudo — 최근에 인증했으면 묻지 않는다). 파일을 서빙하는 funnel 설정은 operator 를 준 사용자로도 거부되기 때문이다. 비밀번호를 입력할 수 있게 터미널에서 직접 실행한다. `| tee` 로 실행해도 입력은 되지만 프롬프트는 로그 파일에 남지 않는다.
 
 | 옵션 | 뜻 |
 |---|---|
@@ -189,6 +190,8 @@ tailscale status --json | plutil -extract Self.Tags json -o - -     # → ["tag:
 ▶ 첫 상태 파일 대기 (최대 40s)
   → ~/Library/Application Support/mongshell-openclaw-agent/status.json
 ▶ tailscale funnel 설정
+  파일을 서빙하는 funnel 설정은 관리자 권한이 필요해 sudo 로 실행합니다 (비밀번호를 물을 수 있습니다).
+  Password:                    ← 맥 로그인 비밀번호 (최근에 인증했으면 안 나온다)
   (tailscale 출력)
 ▶ 공개 URL 확인
   → 응답 확인
@@ -224,7 +227,7 @@ tailscale status --json | plutil -extract Self.Tags json -o - -     # → ["tag:
 | `~/Library/Application Support/mongshell-openclaw-agent/` | 바이너리, `status.json`(0644), `token`(0600), `options`(설치 옵션, `key=value`) |
 | `~/Library/LaunchAgents/com.mongshell.openclaw-agent.plist` | LaunchAgent (RunAtLoad·KeepAlive) |
 | `~/Library/Logs/mongshell-openclaw-agent.log` | 시작·상태 변화·복구 시도·쓰기 실패·자기 레이블 경고 시에만 한 줄씩 기록 ([5-3](#5-3-서버-맥-진단-명령)) |
-| tailscaled 의 serve 설정 | 포트 8443, 경로 `/<토큰>` → `status.json` (funnel, `--bg` 로 영구 저장) |
+| tailscaled 의 serve 설정 | 포트 8443, 경로 `/<토큰>` → `status.json` (funnel, `--bg` 로 저장 — 데몬 재시작 뒤 유지되는지는 [6](#6-첫-설치-때-확인할-것-실기-미검증-가정) 가정 4) |
 
 ### F. 동작 확인
 
@@ -325,7 +328,7 @@ funnel 경로 → LaunchAgent → 데이터 폴더(토큰·설치 옵션 포함)
 
 ### 5-1. install.sh / uninstall.sh 메시지별
 
-`오류:` 는 중단, `경고:` 는 계속 진행이다. 공통 원칙: 공개 여부를 **확인할 수 없으면 진행하지 않는다**(fail-closed). 대부분 원인을 고친 뒤 같은 명령을 다시 실행하면 된다.
+`오류:` 는 중단, `경고:` 는 계속 진행이다. 공통 원칙: 공개 여부를 **확인할 수 없으면 진행하지 않는다**(fail-closed). 대부분 원인을 고친 뒤 같은 명령을 다시 실행하면 된다. 메시지가 안내하는 `tailscale funnel … off` 명령이 권한 거부로 실패하면 같은 명령 앞에 `sudo` 를 붙인다.
 
 **사전조건 (install.sh)**
 
@@ -368,7 +371,9 @@ funnel 경로 → LaunchAgent → 데이터 폴더(토큰·설치 옵션 포함)
 | `경고: 설치 옵션을 저장하지 못했습니다 — 다음 재실행은 옵션을 다시 줘야 합니다: …` | 데이터 폴더 쓰기 실패 | 에이전트는 이번 옵션으로 돈다. `ls -la ~/Library/Application\ Support/mongshell-openclaw-agent/` 로 권한 확인 |
 | `launchctl bootstrap 실패…` | 등록 실패 | 메시지의 `launchctl bootstrap gui/<uid> …` 를 직접 실행해 에러 확인. 해당 사용자가 서버 맥 화면에 로그인해 있지 않으면 `gui/<uid>` 도메인이 없어 실패한다 — 로그인 상태([D](#d-상시-가동))에서 재실행 |
 | `상태 파일이 생기지 않았습니다. 로그 확인: …` | 에이전트가 40초 안에 첫 파일을 못 씀 | `tail -n 50 ~/Library/Logs/mongshell-openclaw-agent.log`, `launchctl print gui/$(id -u)/com.mongshell.openclaw-agent` 의 `last exit code` |
-| `tailscale funnel 설정 실패…` | operator 권한 없음, HTTPS 인증서·funnel nodeAttr 미설정 | `sudo tailscale set --operator=$USER`, [C](#c-tailscale-관리-콘솔) 재확인 후 재실행 |
+| `sudo 인증 실패…` | sudo 가 비밀번호를 받지 못함 (터미널 없이 실행·비밀번호 오류), 관리자 계정이 아님 | 터미널에서 직접 재실행. 이 시점에 에이전트는 이미 설치돼 돌고 있으므로 재실행은 안전하다 |
+| `tailscale funnel 설정 실패…` | HTTPS 인증서·funnel nodeAttr 미설정 등 — 바로 위 tailscale 출력이 원인을 말한다 | [C](#c-tailscale-관리-콘솔) 재확인 후 재실행. 에이전트는 이미 설치돼 돌고 있다 |
+| `401 Unauthorized: must be root, or be an operator and able to run 'sudo tailscale' to serve a path or Unix socket` (tailscale 의 출력) | 파일을 서빙하는 serve 설정을 sudo 없이 보냄 — funnel 설정을 sudo 없이 실행하는 옛 `install.sh`, 또는 명령을 손으로 실행 | `install.sh` 가 funnel 설정을 sudo 로 실행하는 판인지 확인하고(`grep -n 'sudo "\$TAILSCALE"' server/install.sh`), 손으로 실행했다면 같은 명령 앞에 `sudo` 를 붙인다 |
 | `경고: 이 맥에서 URL 응답을 확인하지 못했습니다 (전파 지연일 수 있음)…` | 인증서 첫 발급 지연·자기 자신 접속 불가 | 몇 분 뒤 외부망 기기로 [F](#f-동작-확인) |
 | `토큰 없는 https://…:8443/ 가 NNN 를 돌려줍니다…` | 루트가 404 가 아님 = 토큰 외 무언가 공개됨. 스크립트가 8443 funnel 을 내렸다 | `tailscale funnel status` 로 8443 의 다른 핸들러를 끄고 재설치. "내리는 데도 실패했습니다" 가 함께 나오면 `tailscale funnel --https=8443 off` 를 직접 |
 | `경고: …에 닿지 못해 루트 비공개를 확인하지 못했습니다…` / `…예상한 404 가 아닌 NNN…` | 이 맥에서 확인 불가 | 외부망 기기로 루트가 404 인지 확인 |
@@ -425,20 +430,20 @@ cat ~/Library/Application\ Support/mongshell-openclaw-agent/status.json
 
 ## 6. 첫 설치 때 확인할 것 (실기 미검증 가정)
 
-스크립트 주석이 "실기 미확인" 으로 표시한 가정과, 그와 맞물린 확인 사항이다. 첫 설치 때 하나씩 확인하고, 틀린 것이 있으면 아래 정보 수집 결과와 함께 보고한다.
+스크립트가 기대는 가정과, 그와 맞물린 확인 사항이다. **실기** 열은 2026-09-29 첫 설치(macOS 27, tailscale 1.102.4) 때의 결과다 — 상태 URL 은 외부망 기기에서도 열어 확인했고, 그 밖은 서버 맥 자신에서 확인했다. Tailscale 버전이 다르면 다시 확인하고, 틀린 것이 있으면 아래 정보 수집 결과와 함께 보고한다.
 
-| # | 가정 (출처) | 확인 방법 | 틀렸을 때 증상 |
-|---|---|---|---|
-| 1 | serve 설정이 비었을 때 `tailscale serve status --json` 은 빈 출력, JSON, 또는 `No serve config` 로 시작하는 문구다 (`lib.sh`) | **설치 전**에 `tailscale serve status --json; echo "exit $?"` | `'tailscale serve status --json' 출력이 JSON 이 아닙니다` 로 설치 중단 |
-| 1a | brew 판 tailscaled 에 operator 를 준 일반 사용자가 `tailscale up`·`status`·`serve`·`funnel` 을 sudo 없이 쓸 수 있다 (이 문서 [B](#b-tailscale-오픈소스판-brew-formula) 단계, 실기 미확인) | B 이후 `tailscale status` 가 sudo 없이 되는지 | `access denied`·권한 오류. E 에서 `tailscale funnel 설정 실패` |
-| 2 | serve JSON 구조가 `Web["<DNS 이름>:8443"].Handlers`, `TCP["8443"]`, `Foreground` 다 (`lib.sh` 의 해석) | **설치 후** repo 루트에서 아래 명령이 `/<토큰>` 한 줄을 출력하는지 | 빈 출력이면 스크립트가 경로를 못 본다 → 포트 점검이 무의미해지고, `--rotate-token`·uninstall 이 옛 경로를 "없음" 으로 보고 **해제 없이** 진행할 수 있다. 가장 중요한 확인 |
-| 3 | funnel 대상에 파일 경로를 주면 그 파일 하나를 `--set-path` 경로에 서빙한다 (`install.sh` §8) | 외부망에서 상태 URL 이 JSON 을 돌려주는지 ([F](#f-동작-확인)) | 404·빈 응답·디렉터리 목록 |
-| 4 | `--bg` 는 설정을 tailscaled 에 영구 저장한다 (`install.sh` §8) | `sudo brew services restart tailscale` 후 `tailscale funnel status` 와 외부망 URL 재확인 | 데몬 재시작·재부팅 뒤 ⚪ `주소 또는 토큰이 맞지 않습니다` 또는 연결 불가 |
-| 5 | `--yes` 는 버전에 따라 없을 수 있어 help 에 있을 때만 붙인다 (`install.sh` §8) | `tailscale funnel --help 2>&1 \| grep -E -- '--?yes'` | 없으면 `▶ tailscale funnel 설정` 에서 확인 프롬프트·브라우저 안내가 뜨고 멈춘 것처럼 보일 수 있다 — 화면 안내를 따른다 |
-| 6 | `funnel --https=8443 --set-path=/<토큰> off` 가 그 경로 하나만 해제한다 (`install.sh`·`uninstall.sh`) | `--rotate-token` 한 번 실행 → `tailscale funnel status` 에 새 경로만 있고, 외부망에서 옛 URL 이 404 | `해제 명령은 성공했지만 옛 공개 경로가 남아 있습니다` (스크립트가 잡음), 또는 다른 경로까지 사라짐 |
-| 7 | 토큰 경로만 걸려 있으면 루트 `/` 는 404 다 (`install.sh` §9) | 외부망에서 `https://<DNS 이름>:8443/` | 설치 끝에서 `토큰 없는 … 가 NNN 를 돌려줍니다` 로 중단 |
-| 8 | (추정) 설치 스크립트의 URL 자가 확인은 서버 맥 자신에서 하므로 MagicDNS 가 tailnet 주소로 풀려 **Funnel(인터넷 경로)을 거치지 않았을 수 있다** | 반드시 외부망 기기로 [F](#f-동작-확인) | `→ 응답 확인` 이 나와도 외부에서는 안 열림 |
-| 9 | root 인 tailscaled 가 `~/Library/Application Support` 아래 파일을 권한 프롬프트 없이 읽는다 (`install.sh` DATA_DIR 주석) | 외부망 URL 이 JSON 을 돌려주는지 | `status.json` 은 갱신되는데 URL 이 오류(5xx·404)를 돌려줌 |
+| # | 가정 (출처) | 실기 | 확인 방법 | 틀렸을 때 증상 |
+|---|---|---|---|---|
+| 1 | serve 설정이 비었을 때 `tailscale serve status --json` 은 빈 출력, JSON, 또는 `No serve config` 로 시작하는 문구다 (`lib.sh`) | 확인 — `{}` 가 나왔다 | **설치 전**에 `tailscale serve status --json; echo "exit $?"` | `'tailscale serve status --json' 출력이 JSON 이 아닙니다` 로 설치 중단 |
+| 1a | brew 판 tailscaled 에 operator 를 준 일반 사용자가 `tailscale status`·`serve status` 를 sudo 없이 쓸 수 있다 (이 문서 [B](#b-tailscale-오픈소스판-brew-formula) 단계) | 확인. 단 **파일을 서빙하는 funnel 설정은 operator 로도 거부**돼 `install.sh` 가 그 명령을 sudo 로 실행한다 | B 이후 `tailscale status` 와 `tailscale serve status` 가 sudo 없이 되는지 | `access denied`·권한 오류 |
+| 2 | serve JSON 구조가 `Web["<DNS 이름>:8443"].Handlers`, `TCP["8443"]`, `Foreground` 다 (`lib.sh` 의 해석) | `Web[…].Handlers` 는 확인 — 아래 명령이 `/<토큰>` 을 출력했다. `TCP[…].TCPForward`·`Foreground` 분기는 그런 설정이 없어 미확인 | **설치 후** repo 루트에서 아래 명령이 `/<토큰>` 한 줄을 출력하는지 | 빈 출력이면 스크립트가 경로를 못 본다 → 포트 점검이 무의미해지고, `--rotate-token`·uninstall 이 옛 경로를 "없음" 으로 보고 **해제 없이** 진행할 수 있다. 가장 중요한 확인 |
+| 3 | funnel 대상에 파일 경로를 주면 그 파일 하나를 `--set-path` 경로에 서빙한다 (`install.sh` §8) | 확인 (외부망 기기에서도) | 외부망에서 상태 URL 이 JSON 을 돌려주는지 ([F](#f-동작-확인)) | 404·빈 응답·디렉터리 목록 |
+| 4 | `--bg` 는 설정을 tailscaled 에 영구 저장한다 (`install.sh` §8) | 미확인 | `sudo brew services restart tailscale` 후 `tailscale funnel status` 와 외부망 URL 재확인 | 데몬 재시작·재부팅 뒤 ⚪ `주소 또는 토큰이 맞지 않습니다` 또는 연결 불가 |
+| 5 | `--yes` 는 버전에 따라 없을 수 있어 help 에 있을 때만 붙인다 (`install.sh` §8) | 미확인 | `tailscale funnel --help 2>&1 \| grep -E -- '--?yes'` | 없으면 `▶ tailscale funnel 설정` 에서 확인 프롬프트·브라우저 안내가 뜨고 멈춘 것처럼 보일 수 있다 — 화면 안내를 따른다 |
+| 6 | `funnel --https=8443 --set-path=/<토큰> off` 가 그 경로 하나만 해제하고, operator 를 준 사용자가 sudo 없이 실행할 수 있다 (`install.sh`·`uninstall.sh`) | 미확인 | `--rotate-token` 한 번 실행 → `tailscale funnel status` 에 새 경로만 있고, 외부망에서 옛 URL 이 404 | `옛 공개 경로 해제 실패` (권한 거부면 메시지의 명령 앞에 `sudo` 를 붙여 끈 뒤 재실행), `해제 명령은 성공했지만 옛 공개 경로가 남아 있습니다` (스크립트가 잡음), 또는 다른 경로까지 사라짐 |
+| 7 | 토큰 경로만 걸려 있으면 루트 `/` 는 404 다 (`install.sh` §9) | 확인 (서버 맥 자신에서만) | 외부망에서 `https://<DNS 이름>:8443/` | 설치 끝에서 `토큰 없는 … 가 NNN 를 돌려줍니다` 로 중단 |
+| 8 | (추정) 설치 스크립트의 URL 자가 확인은 서버 맥 자신에서 하므로 MagicDNS 가 tailnet 주소로 풀려 **Funnel(인터넷 경로)을 거치지 않았을 수 있다** | 자가 확인이 어느 경로를 탔는지는 미확인. 외부망 기기에서는 상태 URL 이 열렸다 | 반드시 외부망 기기로 [F](#f-동작-확인) | `→ 응답 확인` 이 나와도 외부에서는 안 열림 |
+| 9 | root 인 tailscaled 가 `~/Library/Application Support` 아래 파일을 권한 프롬프트 없이 읽는다 (`install.sh` DATA_DIR 주석) | 확인 (외부망 기기에서도) | 외부망 URL 이 JSON 을 돌려주는지 | `status.json` 은 갱신되는데 URL 이 오류(5xx·404)를 돌려줌 |
 
 가정 2 확인 명령 (서버 맥, repo 루트):
 ```bash

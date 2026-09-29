@@ -270,9 +270,9 @@ done
 echo "  → $STATUS_FILE"
 
 # ── 8. funnel ──────────────────────────────────────────────────────────────
-# 가정(개발 맥에 tailscale 이 없어 실기 확인 못 함): 파일 경로를 대상으로 주면
-# funnel 이 그 파일 하나를 --set-path 경로에 서빙하고, --bg 는 설정을 tailscaled
-# 에 영구 저장한다. --yes(확인 프롬프트 생략)는 버전에 따라 없을 수 있어 help 로
+# 파일 경로를 대상으로 주면 funnel 이 그 파일 하나를 --set-path 경로에 서빙한다
+# (실기 확인, tailscale 1.102.4). 가정(실기 미확인): --bg 는 설정을 tailscaled 에
+# 영구 저장한다. --yes(확인 프롬프트 생략)는 버전에 따라 없을 수 있어 help 로
 # 지원 여부를 보고 붙인다.
 step "tailscale funnel 설정"
 FUNNEL_ARGS=(funnel --bg --https="$FUNNEL_PORT" --set-path="/$TOKEN")
@@ -284,10 +284,17 @@ if grep -qE -- '(^|[[:space:],])--?yes([[:space:],=]|$)' <<<"$FUNNEL_HELP"; then
   FUNNEL_ARGS+=(--yes)
 fi
 FUNNEL_ARGS+=("$STATUS_FILE")
-if ! "$TAILSCALE" "${FUNNEL_ARGS[@]}"; then
-  die "tailscale funnel 설정 실패. brew 판 tailscaled 는 root 로 돌아 일반 사용자 CLI 권한이 부족할 수 있습니다.
-  sudo tailscale set --operator=\$USER
-를 한 번 실행한 뒤 다시 설치하세요. 관리 콘솔의 HTTPS 인증서·funnel nodeAttr 도 확인하세요 (README)."
+# 실기(brew 판 tailscale 1.102.4)에서 operator 를 준 사용자의 파일 서빙 설정이
+# 거부됐다: "must be root, or be an operator and able to run 'sudo tailscale' to
+# serve a path or Unix socket". 문구상 sudo 가능한 operator 는 허용이지만 그
+# 환경에서는 통하지 않았다 (원인 미확인). 그래서 이 명령은 root 로 실행한다.
+echo "  파일을 서빙하는 funnel 설정은 관리자 권한이 필요해 sudo 로 실행합니다 (비밀번호를 물을 수 있습니다)."
+# 인증 실패와 tailscale 실패를 다른 메시지로 알리려고 인증을 먼저 따로 받는다.
+sudo -v || die "sudo 인증 실패. 비밀번호를 입력할 수 있는 터미널에서 직접 실행했는지, 이 계정이 관리자인지 확인하세요.
+에이전트는 이미 설치돼 돌고 있으니 다시 실행하면 됩니다."
+if ! sudo "$TAILSCALE" "${FUNNEL_ARGS[@]}"; then
+  die "tailscale funnel 설정 실패 (위 tailscale 출력 참조). 관리 콘솔의 HTTPS 인증서·funnel nodeAttr 를 확인하세요 (README).
+에이전트는 이미 설치돼 돌고 있으니 고친 뒤 다시 실행하면 됩니다."
 fi
 
 # ── 9. 확인 ────────────────────────────────────────────────────────────────
@@ -315,7 +322,7 @@ case "$ROOT_CODE" in
     if "$TAILSCALE" funnel --https="$FUNNEL_PORT" off; then
       PORT_OFF="포트 $FUNNEL_PORT 의 funnel 공개는 내렸습니다 (우리 경로 포함)."
     else
-      PORT_OFF="포트 $FUNNEL_PORT 의 funnel 공개를 내리는 데도 실패했습니다 — 지금도 공개돼 있을 수 있으니 'tailscale funnel --https=$FUNNEL_PORT off' 로 직접 끄세요."
+      PORT_OFF="포트 $FUNNEL_PORT 의 funnel 공개를 내리는 데도 실패했습니다 — 지금도 공개돼 있을 수 있으니 'tailscale funnel --https=$FUNNEL_PORT off' 로 직접 끄세요 (권한 거부면 앞에 sudo)."
     fi
     die "토큰 없는 $ROOT_URL 가 $ROOT_CODE 를 돌려줍니다 — 토큰 경로 말고 다른 것이 공개돼 있습니다.
 $PORT_OFF

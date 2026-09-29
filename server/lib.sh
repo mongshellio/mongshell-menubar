@@ -9,8 +9,9 @@
 FUNNEL_PORT=8443
 
 # 설정이 비었을 때 'serve status --json' 이 JSON 대신 내놓을 수 있는 문구.
-# 실기 미확인 가정: 빈 설정에서 빈 출력이나 "No serve config" 류 텍스트가 나올 수
-# 있다고 보고 대비한다. 여기 없는 비-JSON 은 설정 존재를 숨길 수 있으니 실패로 둔다.
+# 실기(tailscale 1.102.4)에서는 빈 설정이 "{}" 로 나왔다. 빈 출력이나
+# "No serve config" 류 텍스트는 다른 버전을 대비한 가정이다 (실기 미확인).
+# 여기 없는 비-JSON 은 설정 존재를 숨길 수 있으니 실패로 둔다.
 SERVE_EMPTY_PATTERN='^no serve config'
 # 해석 실패 시 에러에 보여줄 원문 길이(바이트).
 SERVE_EXCERPT_BYTES=200
