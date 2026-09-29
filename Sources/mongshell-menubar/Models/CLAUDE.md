@@ -30,7 +30,7 @@ non_goals:
 
 ## 싱글턴
 
-`UsageModel.shared` / `Preferences.shared` / `OpenClawModel.shared` 는 의도된 싱글턴이다 — AppKit 호스트와 SwiftUI 뷰가 **같은 인스턴스를 관찰해야** 하기 때문. 새 싱글턴을 늘리지 않는다. 그 이유가 없는 상태는 소유자에게 주입한다.
+`UsageModel.shared` / `Preferences.shared` / `OpenClawModel.shared` / `ClaudeSettingsModel.shared` 는 의도된 싱글턴이다 — AppKit 호스트와 SwiftUI 뷰가 **같은 인스턴스를 관찰해야** 하기 때문. 새 싱글턴을 늘리지 않는다. 그 이유가 없는 상태는 소유자에게 주입한다.
 
 ## 쓰기 가능 상태는 `private(set)`
 
