@@ -19,6 +19,15 @@ struct MenuBarIconView: View {
         nonmutating set { _pulsing.wrappedValue = newValue }
     }
 
+    // 초기값이 있는 `private var` 저장 프로퍼티도 멤버와이즈 이니셜라이저에
+    // 들어가 그 접근 수준을 private 으로 끌어내린다. 다른 파일(AppDelegate)이
+    // 뷰를 만들 수 있게 이니셜라이저를 직접 적는다.
+    init(model: UsageModel, prefs: Preferences, openClaw: OpenClawModel) {
+        self.model = model
+        self.prefs = prefs
+        self.openClaw = openClaw
+    }
+
     private var fiveHourUsed: Int { model.snapshot.fiveHourPercent }
     private var weeklyUsed: Int { model.snapshot.weeklyAllPercent }
 

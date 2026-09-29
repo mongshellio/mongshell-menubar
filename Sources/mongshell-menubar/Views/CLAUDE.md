@@ -31,6 +31,8 @@ private var pulsing: Bool {
 }
 ```
 
+이렇게 펼친 뷰에는 **`init` 을 직접 적는다.** 초기값이 있는 `private var` 저장 프로퍼티도 멤버와이즈 이니셜라이저에 들어가 그 접근 수준을 private 으로 끌어내리므로, 다른 파일에서 뷰를 만들면 빌드가 깨진다.
+
 `@Binding`·`@ObservedObject`·`@StateObject`·`@Environment`·`@AppStorage` 는 여전히 프로퍼티 래퍼라 그대로 쓴다. `@Entry`·`@Animatable` 도 같은 플러그인을 요구하므로 쓰지 않는다.
 
 `App/AppDelegate.swift` 가 AppKit 호스트(`NSStatusItem`/`NSPopover`/설정 윈도우)를 소유한다. 팝오버의 생명주기·상호배타(hover ↔ 클릭)는 뷰가 아니라 AppDelegate 의 책임이다.
