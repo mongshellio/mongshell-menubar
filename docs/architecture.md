@@ -85,7 +85,7 @@ UsageModel.pollLoop()  ──(@MainActor, Task)
 [맥북] 메뉴바 앱  OpenClawModel ──(주기 폴링, 기본 60초 · 최소 15초)
    └─ OpenClawStatusClient → HTTPS GET (ephemeral 세션, 캐시 무시, 타임아웃 10초, 리다이렉트 거부, 200 응답만 본문을 64KB 까지 읽음)
         └─ 관대한 디코딩 (detail 은 제어문자·줄바꿈 문자→공백, 120자·유니코드 스칼라 480개) → OpenClawReading (마지막 성공 응답 보관)
-             └─ OpenClawHealth: 🟢 ok / 🟡 degraded / 🔴 down(서버 보고) / ⚪️ unreachable
+             └─ OpenClawHealth: 🟢 ok / 🟡 degraded / 🔴 down(서버 보고) / ⚪️ unreachable  (서버 detail 은 ok·degraded·down 모두 팝오버·설정 상태 행에 표시)
    └─ lastHeal.at 이 지금까지 본 것보다 늦어짐 → "openclaw 자동 재시작됨 (서버)" / "openclaw 자동 재시작 실패 (서버)" 알림 (첫 응답은 기준점)
 ```
 

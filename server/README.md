@@ -384,7 +384,7 @@ funnel 경로 → LaunchAgent → 데이터 폴더(토큰·설치 옵션 포함)
 
 ### 5-2. 공개 URL · 메뉴바 증상별
 
-맥북 설정의 **상태** 줄에 `서버 연락 두절 — <detail>` 형태로 이유가 붙는다.
+맥북 설정의 **상태** 줄에 `서버 연락 두절 — <detail>` / `게이트웨이 다운 — <detail>` 형태로 이유가 붙는다 (팝오버에도 같은 detail 이 한 줄로 보인다).
 
 | 메뉴바 / detail | 뜻 | 확인 순서 |
 |---|---|---|
@@ -397,7 +397,8 @@ funnel 경로 → LaunchAgent → 데이터 폴더(토큰·설치 옵션 포함)
 | ⚪ `상태 파일에 확인 시각이 없습니다` | JSON 에 해석 가능한 `checkedAt` 없음 | `cat ~/Library/Application\ Support/mongshell-openclaw-agent/status.json` |
 | ⚪ `서버 에이전트가 갱신을 멈췄습니다` | 응답은 오는데 `checkedAt` 이 오래됨 — 에이전트가 멈춤 | `launchctl print …` 로 실행 여부, 로그의 `상태 파일 쓰기 실패` 여부. 서버 맥 로그아웃·잠자기도 원인 |
 | ⚪ `확인 중…` | URL 적용 후 아직 첫 응답 전 | 확인 간격만큼 기다린다 |
-| 🔴 `게이트웨이 다운` | 서버가 down 보고 (probe 시간 초과·연결 거부·출력 해석 불가, 또는 openclaw 바이너리 없음) | 서버 맥에서 `openclaw channels status --probe`. 바이너리 부재 여부는 URL 을 직접 열어 `detail` 이 `openclaw 바이너리 없음` 인지 본다 (메뉴바는 이 detail 을 표시하지 않는다) |
+| 🔴 `게이트웨이 다운` (detail 없음) | 서버가 down 보고 — probe 시간 초과·연결 거부·출력 해석 불가 | 서버 맥에서 `openclaw channels status --probe` |
+| 🔴 `게이트웨이 다운 — openclaw 바이너리 없음` | 에이전트가 `/opt/homebrew/bin`·`/usr/local/bin` 어디에서도 openclaw 를 찾지 못함 | `ls -l /opt/homebrew/bin/openclaw /usr/local/bin/openclaw`. 재설치·경로 이동 후엔 다음 probe 에서 풀린다 |
 | 🟡 `채널 이상 — …` | 채널 일부 멈춤/오류 | 자동복구가 켜져 있으면 2회 연속 실패 뒤 재시작을 시도한다 (쿨다운 600초) |
 | 메뉴바에 신호등이 없음 | `Claude만` 선택 또는 URL 미적용 | [3](#3-각-맥북-설정) 의 메뉴바 표시 |
 
