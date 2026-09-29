@@ -122,9 +122,6 @@ struct OpenClawStatusClient: Sendable {
             throw .network
         }
         guard let http = response as? HTTPURLResponse else { throw .badResponse }
-        // Redirects are refused, so an answer from another host means something
-        // between us and the agent rewrote the request — don't trust it.
-        guard http.url?.host?.lowercased() == url.host?.lowercased() else { throw .badResponse }
         return try Self.interpret(statusCode: http.statusCode, data: data)
     }
 
