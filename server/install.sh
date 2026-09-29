@@ -24,6 +24,9 @@ STATUS_WAIT_SECONDS=40
 CURL_ATTEMPTS=6
 
 INTERVAL=""
+# 에이전트(Options.minimumInterval/maximumInterval)와 같은 범위.
+MIN_INTERVAL=15
+MAX_INTERVAL=86400
 AUTO_HEAL=1
 ROTATE_TOKEN=0
 
@@ -34,7 +37,7 @@ step() { printf '▶ %s\n' "$*"; }
 usage() {
   cat <<EOF
 사용법: $0 [옵션]
-  --interval N      probe 주기(초, 기본 60, 최소 15)
+  --interval N      probe 주기(초, 기본 60, $MIN_INTERVAL~$MAX_INTERVAL)
   --no-auto-heal    게이트웨이 자동복구 끄기 (기본: 켬)
   --rotate-token    공개 URL 토큰을 새로 발급 (옛 URL 은 즉시 무효)
   -h, --help        이 도움말
@@ -44,8 +47,12 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --interval)
-      [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || die "--interval 에는 정수(초)가 필요합니다"
-      INTERVAL="$2"; shift 2 ;;
+      # 자릿수 상한을 먼저 걸어 산술 비교에서 오버플로가 나지 않게 한다.
+      [[ $# -ge 2 && "$2" =~ ^[0-9]{1,6}$ ]] || die "--interval 에는 6자리 이하 정수(초)가 필요합니다"
+      # 10# — 앞자리 0 을 8진수로 읽지 않도록.
+      (( 10#$2 >= MIN_INTERVAL && 10#$2 <= MAX_INTERVAL )) \
+        || die "--interval 은 $MIN_INTERVAL~$MAX_INTERVAL 초여야 합니다: $2"
+      INTERVAL="$((10#$2))"; shift 2 ;;
     --no-auto-heal) AUTO_HEAL=0; shift ;;
     --rotate-token) ROTATE_TOKEN=1; shift ;;
     -h|--help) usage; exit 0 ;;

@@ -12,6 +12,10 @@ struct Options {
     /// Probe takes up to 8s and heal adds 3s + a re-probe; below this the loop
     /// would spend most of its time probing.
     static let minimumInterval = 15
+    /// A day. Clients derive their "server unreachable" threshold from
+    /// 3×interval, so an unbounded value would mean a dead agent is never
+    /// noticed (and the product could overflow).
+    static let maximumInterval = 86_400
     static let defaultSelfLabel = "com.mongshell.openclaw-agent"
 
     var statusFile: URL
@@ -25,7 +29,7 @@ let usage = """
     사용법: mongshell-openclaw-agent --status-file <path> [옵션]
       --status-file <path>     판정 결과 JSON 을 쓸 경로 (필수)
       --gateway-label <label>  재시작할 게이트웨이 launchd 레이블 (기본: 자동 탐색)
-      --interval <sec>         probe 주기, 초 (기본 \(Options.defaultInterval), 최소 \(Options.minimumInterval))
+      --interval <sec>         probe 주기, 초 (기본 \(Options.defaultInterval), \(Options.minimumInterval)~\(Options.maximumInterval))
       --no-auto-heal           자동복구 끄기
       --self-label <label>     이 에이전트의 launchd 레이블 (기본 \(Options.defaultSelfLabel))
     """
@@ -56,7 +60,7 @@ func parseOptions(_ args: [String]) -> Options {
         case "--interval":
             let raw = value(for: arg)
             guard let n = Int(raw) else { fail("--interval 은 정수여야 합니다: \(raw)") }
-            interval = max(n, Options.minimumInterval)
+            interval = min(max(n, Options.minimumInterval), Options.maximumInterval)
         case "--no-auto-heal":
             autoHeal = false
         case "--self-label":
