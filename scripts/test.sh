@@ -40,7 +40,7 @@ echo "▶ running openclaw agent tests"
 # The app client is compiled together with the agent's encoder so the
 # round-trip case catches any key-name drift between the two targets. The
 # @MainActor model (polling, notifications) is left out — its rules live in
-# the pure types listed here.
+# the pure types listed here, plus the TimeText clock it displays.
 APP="$ROOT/Sources/mongshell-menubar"
 echo "▶ compiling openclaw client tests"
 swiftc -o "$OUT/client-tests" \
@@ -48,6 +48,7 @@ swiftc -o "$OUT/client-tests" \
   "$APP/Models/OpenClawHealth.swift" \
   "$APP/Models/OpenClawStatus.swift" \
   "$APP/Services/OpenClawStatusClient.swift" \
+  "$APP/Services/TimeText.swift" \
   "$AGENT/Probe.swift" \
   "$AGENT/StatusFile.swift" \
   "$ROOT/Tests/OpenClawClientTests/main.swift"

@@ -4,7 +4,8 @@ import Foundation
 //
 // Each case pins a rule whose mutation would change what the dot says: the
 // wire keys shared with the server agent, the unreachable threshold, the
-// grey-vs-red split, URL validation, and when a server heal is announced.
+// grey-vs-red split, URL validation, when a server heal is announced, and the
+// clock text shown next to it.
 //
 // Run with `./scripts/test.sh`, which compiles this against the real app
 // sources *and* the agent's `Probe.swift` / `StatusFile.swift`, so the
@@ -101,10 +102,36 @@ do {
     check("schema 2 + 모르는 키도 읽힘", future?.health == .ok(detail: "d"),
           "\(String(describing: future))")
 
+    let boolInterval = try? parse(#"{"checkedAt":"\#(iso(now))","health":"ok","intervalSeconds":true}"#).get()
+    check("intervalSeconds 가 bool → 누락 취급", boolInterval != nil && boolInterval?.intervalSeconds == nil,
+          "\(String(describing: boolInterval?.intervalSeconds))")
+
     if case .failure(let e) = parse("[1,2]") {
         check("객체가 아닌 JSON → badResponse", e == .badResponse)
     } else { check("객체가 아닌 JSON → 실패", false) }
 
+}
+
+// MARK: - 원격 문자열·응답 크기
+
+print("▸ 원격 문자열 정화 · 응답 크기")
+do {
+    func detail(_ raw: String, health: String = "ok") -> String? {
+        let doc: [String: Any] = ["checkedAt": iso(now), "health": health, "detail": raw]
+        let data = try! JSONSerialization.data(withJSONObject: doc)
+        return (try? OpenClawStatusClient.parse(data: data))?.health.detailText
+    }
+    check("detail 개행·제어문자 → 공백",
+          detail("a\nb\tc\u{7}d\r\n") == "a b c d", "\(String(describing: detail("a\nb\tc\u{7}d\r\n")))")
+    let long = detail(String(repeating: "가", count: 500))
+    check("detail 120자로 자름", long?.count == OpenClawStatusClient.detailDisplayLimit,
+          "\(String(describing: long?.count))")
+    let odd = detail("", health: "re\nbooting")
+    check("모르는 health 도 한 줄로", odd == "알 수 없는 상태: re booting", "\(String(describing: odd))")
+
+    check("64KB 정확히 → 허용", !OpenClawStatusClient.exceedsSizeLimit(64 * 1024))
+    check("64KB + 1 → 초과", OpenClawStatusClient.exceedsSizeLimit(64 * 1024 + 1))
+    check("길이 모름(-1) → 스트리밍으로 판정", !OpenClawStatusClient.exceedsSizeLimit(-1))
 }
 
 // MARK: - HTTP
@@ -121,6 +148,16 @@ do {
     check("404 → unreachable + 토큰 문구",
           r.health(now: now) == .unreachable(detail: "주소 또는 토큰이 맞지 않습니다"))
     check("500 → http(500)", interpret(500) == .http(500))
+    check("302(리다이렉트 거부 결과) → http(302)", interpret(302) == .http(302))
+
+    check("URLError.cancelled → cancelled", OpenClawStatusError.transport(.cancelled) == .cancelled)
+    check("URLError.timedOut → timedOut", OpenClawStatusError.transport(.timedOut) == .timedOut)
+    check("오프라인 → offline", OpenClawStatusError.transport(.notConnectedToInternet) == .offline)
+    check("그 밖의 전송 오류 → network", OpenClawStatusError.transport(.cannotFindHost) == .network)
+    var cancelled = OpenClawReading()
+    cancelled.recordFailure(.cancelled)
+    check("취소는 실패로 기록하지 않음", cancelled.health(now: now) == .unknown,
+          "\(cancelled.health(now: now))")
 }
 
 // MARK: - 연락 두절 판정
@@ -130,12 +167,23 @@ do {
     let fresh = reading(checkedSecondsAgo: 60, now: now).health(now: now)
     check("60초 전 → 정상", fresh == .ok(detail: "Telegram default"), "\(fresh)")
 
+    check("180초 정각 → 아직 정상 (경계 포함)",
+          reading(checkedSecondsAgo: 180, now: now).health(now: now) == .ok(detail: "Telegram default"))
     let stale = reading(checkedSecondsAgo: 181, now: now).health(now: now)
     if case .unreachable = stale { check("181초 전 → unreachable", true) }
     else { check("181초 전 → unreachable", false, "\(stale)") }
 
     let skew = reading(checkedSecondsAgo: -600, now: now).health(now: now)
     check("미래 시각 → 정상 (나이 0)", skew == .ok(detail: "Telegram default"), "\(skew)")
+
+    // Server clock ahead: the same future checkedAt re-read later must age from
+    // when we first saw it, or a dead agent stays green for the whole skew.
+    var ahead = reading(checkedSecondsAgo: -3600, now: now)
+    let sameDoc = ahead.lastSuccess!
+    ahead.recordSuccess(sameDoc, receivedAt: now.addingTimeInterval(181))
+    check("미래 checkedAt 재수신 → 첫 수신 시각 기준으로 두절",
+          ahead.lastCheckedAt == now && ahead.health(now: now.addingTimeInterval(181)) != sameDoc.health,
+          "\(String(describing: ahead.lastCheckedAt))")
 
     check("interval 120 → 임계 360초", OpenClawReading.staleAfter(intervalSeconds: 120) == 360)
     check("interval 120, 359초 전 → 정상",
@@ -165,6 +213,13 @@ do {
           later == .unreachable(detail: "응답 시간 초과"), "\(later)")
 
     check("응답 전 → unknown", OpenClawReading().health(now: now) == .unknown)
+
+    var overlap = reading(checkedSecondsAgo: 10, now: now, health: .down)
+    overlap.recordSuccess(OpenClawStatus(checkedAt: now.addingTimeInterval(-70), health: .ok(detail: "old"),
+                                         intervalSeconds: 60, autoHeal: true, lastHeal: nil),
+                          receivedAt: now)
+    check("늦게 도착한 옛 응답 → 상태 역행 없음", overlap.health(now: now) == .down,
+          "\(overlap.health(now: now))")
 }
 
 // MARK: - URL 검증
@@ -181,6 +236,8 @@ do {
     check("http:// 거부", validate("http://srv.example.ts.net:8443/\(token)") == .failure(.notHTTPS))
     check("빈 URL → nil (미설정)", validate("   ") == .success(nil))
     check("호스트 없음 거부", validate("https:///x") == .failure(.malformed))
+    check("userinfo 거부", validate("https://u:p@h/x") == .failure(.malformed))
+    check("tailnet 처럼 보이는 userinfo 거부", validate("https://a.ts.net@evil.com/x") == .failure(.malformed))
 }
 
 // MARK: - 자동복구 알림 판정
@@ -200,6 +257,42 @@ do {
     var empty = OpenClawHealWatch()
     check("첫 응답 lastHeal null — 알림 없음", empty.observe(nil) == nil)
     check("그 뒤 첫 복구 — 알림", empty.observe(h1) == h1)
+
+    var late = OpenClawHealWatch()
+    _ = late.observe(nil)
+    check("새 복구 — 알림", late.observe(h2) == h2)
+    check("옛 복구가 늦게 도착 — 알림 없음", late.observe(h1) == nil)
+    check("그 뒤 최신 복구 재수신 — 알림 없음", late.observe(h2) == nil)
+}
+
+// MARK: - 시각 표기
+
+print("▸ 시각 표기 (TimeText)")
+do {
+    let cal = Calendar.current
+    func at(_ day: Int, _ hour: Int, _ minute: Int) -> Date {
+        cal.date(from: DateComponents(year: 2026, month: 9, day: day, hour: hour, minute: minute))!
+    }
+    let base = at(29, 15, 0)
+    check("기록 없음 → nil", TimeText.checkedClock(nil, stale: false, now: base) == nil)
+    check("같은 날 오후 → 사용량 줄과 같은 표기",
+          TimeText.checkedClock(at(29, 14, 32), stale: false, now: base) == "오후 2:32",
+          "\(String(describing: TimeText.checkedClock(at(29, 14, 32), stale: false, now: base)))")
+    check("같은 날 오전", TimeText.checkedClock(at(29, 9, 5), stale: false, now: base) == "오전 9:05")
+    check("다른 날 → 날짜 붙임",
+          TimeText.checkedClock(at(28, 14, 32), stale: false, now: base) == "9/28 오후 2:32",
+          "\(String(describing: TimeText.checkedClock(at(28, 14, 32), stale: false, now: base)))")
+
+    func ago(_ minutesBefore: Int) -> String? {
+        TimeText.checkedClock(base.addingTimeInterval(-Double(minutesBefore) * 60), stale: true, now: base)?
+            .components(separatedBy: " · ").last
+    }
+    check("오래됨 59분 → 분", ago(59) == "59분 전", "\(String(describing: ago(59)))")
+    check("오래됨 60분 → 시간", ago(60) == "1시간 전", "\(String(describing: ago(60)))")
+    check("오래됨 23시간 59분 → 시간", ago(24 * 60 - 1) == "23시간 전", "\(String(describing: ago(24 * 60 - 1)))")
+    check("오래됨 24시간 → 일", ago(24 * 60) == "1일 전", "\(String(describing: ago(24 * 60)))")
+    check("오래됨 표기 전체", TimeText.checkedClock(at(29, 14, 37), stale: true, now: base) == "오후 2:37 · 23분 전")
+    check("오래되지 않으면 나이 없음", TimeText.checkedClock(at(29, 14, 37), stale: false, now: base) == "오후 2:37")
 }
 
 print("")
