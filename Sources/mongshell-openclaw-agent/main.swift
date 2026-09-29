@@ -100,6 +100,9 @@ var tracker = HealTracker(lastHealAt: lastHeal?.at)
 var lastLogged: ProbeVerdict?
 
 log("시작 — status-file=\(options.statusFile.path) interval=\(options.interval)s autoHeal=\(options.autoHeal)")
+if options.gatewayLabel == options.selfLabel {
+    log("경고: --gateway-label 이 자기 레이블(\(options.selfLabel))이라 무시하고 자동 탐색합니다")
+}
 
 while true {
     var verdict = Probe.probe()

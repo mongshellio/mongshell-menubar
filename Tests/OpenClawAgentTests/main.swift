@@ -151,6 +151,11 @@ do {
     let explicit = Launchd.gatewayLabel(explicit: "ai.custom", selfLabel: selfLabel, in: dir)
     check("--gateway-label 우선", explicit == "ai.custom", explicit)
 
+    // An explicit label naming the agent itself would make it kickstart
+    // itself on every heal; it must fall through to discovery instead.
+    let selfExplicit = Launchd.gatewayLabel(explicit: selfLabel, selfLabel: selfLabel, in: dir)
+    check("--gateway-label == self → 무시하고 탐색", selfExplicit == "com.zzz.claw-gateway", selfExplicit)
+
     let missing = Launchd.gatewayLabel(
         explicit: nil, selfLabel: selfLabel, in: root.appendingPathComponent("nope"))
     check("디렉토리 없음 → 기본값", missing == Launchd.defaultGatewayLabel, missing)

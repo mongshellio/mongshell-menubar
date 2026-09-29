@@ -50,13 +50,15 @@ enum Launchd {
             .appendingPathComponent("Library/LaunchAgents")
     }
 
-    /// The gateway's launchd label. An explicit label wins. Otherwise: basename
-    /// of the first (sorted) `*.plist` in `dir` whose name contains `claw`,
-    /// **excluding `selfLabel`** — this agent's own plist name also contains
-    /// "claw"; whenever it sorts first (e.g. the gateway's plist is missing or
-    /// renamed) the agent would otherwise kickstart itself.
+    /// The gateway's launchd label. An explicit label wins unless it names this
+    /// agent itself (a misconfigured plist) — then it is ignored like an
+    /// absent one. Otherwise: basename of the first (sorted) `*.plist` in `dir`
+    /// whose name contains `claw`, **excluding `selfLabel`** — this agent's own
+    /// plist name also contains "claw"; whenever it sorts first (e.g. the
+    /// gateway's plist is missing or renamed) the agent would otherwise
+    /// kickstart itself.
     static func gatewayLabel(explicit: String?, selfLabel: String, in dir: URL) -> String {
-        if let explicit, !explicit.isEmpty { return explicit }
+        if let explicit, !explicit.isEmpty, explicit != selfLabel { return explicit }
         let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
         let match = files.sorted().lazy
             .filter { $0.hasSuffix(".plist") && $0.lowercased().contains("claw") }
