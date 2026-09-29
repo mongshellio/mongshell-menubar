@@ -295,8 +295,15 @@ ROOT_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$ROOT_URL" 2
 case "$ROOT_CODE" in
   404) echo "  → 루트 404 확인 (토큰 경로만 공개)" ;;
   2*|3*)
+    # 무엇이 새는지 모르니 우리 경로까지 포함해 이 포트의 인터넷 공개를 통째로 내린다.
+    if "$TAILSCALE" funnel --https="$FUNNEL_PORT" off; then
+      PORT_OFF="포트 $FUNNEL_PORT 의 funnel 공개는 내렸습니다 (우리 경로 포함)."
+    else
+      PORT_OFF="포트 $FUNNEL_PORT 의 funnel 공개를 내리는 데도 실패했습니다 — 지금도 공개돼 있을 수 있으니 'tailscale funnel --https=$FUNNEL_PORT off' 로 직접 끄세요."
+    fi
     die "토큰 없는 $ROOT_URL 가 $ROOT_CODE 를 돌려줍니다 — 토큰 경로 말고 다른 것이 공개돼 있습니다.
-'tailscale funnel status' 로 확인하고 포트 $FUNNEL_PORT 의 다른 핸들러를 끄세요." ;;
+$PORT_OFF
+'tailscale funnel status' 로 확인하고 포트 $FUNNEL_PORT 의 다른 핸들러를 끈 뒤 다시 설치하세요." ;;
   ""|000)
     warn "이 맥에서 $ROOT_URL 에 닿지 못해 루트 비공개를 확인하지 못했습니다. 외부망 기기로 열어 404 인지 확인하세요." ;;
   *)
