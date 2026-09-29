@@ -167,15 +167,16 @@ echo "  → $BIN"
 # 설치 시점에 한 번 돌려 --gateway-label 로 고정한다.
 step "게이트웨이 launchd 레이블 탐색"
 GATEWAY_LABEL=""
-shopt -s nocasematch
 while IFS= read -r f; do
   label="$(basename "$f" .plist)"
-  if [[ "$label" != "$SELF_LABEL" && "$label" == *claw* ]]; then
+  # claw 포함 여부만 대소문자 무시, 자기 레이블 제외는 정확히 일치 — 에이전트의
+  # lowercased().contains("claw") / != selfLabel 과 같다. (bash 3.2 라 ${,,} 없음)
+  lower="$(tr '[:upper:]' '[:lower:]' <<<"$label")"
+  if [[ "$label" != "$SELF_LABEL" && "$lower" == *claw* ]]; then
     GATEWAY_LABEL="$label"
     break
   fi
 done < <(find "$HOME/Library/LaunchAgents" -maxdepth 1 -name '*.plist' 2>/dev/null | LC_ALL=C sort)
-shopt -u nocasematch
 if [[ -z "$GATEWAY_LABEL" ]]; then
   warn "게이트웨이 plist 를 찾지 못해 기본값 $DEFAULT_GATEWAY_LABEL 을 씁니다."
   GATEWAY_LABEL="$DEFAULT_GATEWAY_LABEL"
