@@ -27,6 +27,12 @@
 알려줍니다. **URL 이 없거나 `Claude만`을 고르면 이 요소는 메뉴바·팝오버 어디에도 나타나지
 않고 기존과 100% 동일하게 동작합니다.**
 
+**설치 가이드: [server/README.md](server/README.md)** — 서버 맥 준비부터 맥북 연결·운영·문제 해결까지
+따라 하는 런북입니다. 요약하면:
+1. 서버 맥에 brew 판 Tailscale 을 준비하고 `server/install.sh` 실행 (Tailscale 은 서버 맥에만)
+2. 마지막에 출력되는 상태 URL(`https://…:8443/<토큰>`)을 비밀번호 관리자 등에 보관
+3. 각 맥북의 메뉴바 앱 **설정 → openclaw** 에 붙여넣고 `Claude + openclaw` 선택
+
 ## Claude Code 설정 (선택 기능 — `~/.claude` 가 있을 때만 활성화)
 설정창의 **Claude Code** 섹션에서 `~/.claude/settings.json` 을 직접 편집합니다 — 기본 모델,
 추론 강도, 대체 모델, 컨텍스트 자동 압축, 권한 기본 모드. 각 항목에 무엇을 바꾸는 값인지
