@@ -138,16 +138,14 @@ enum Probe {
         // 🟡 if ANY channel is stopped / not-running / errored.
         let degraded = channelLines.filter(lineIsDegraded)
         if !degraded.isEmpty {
-            let names = degraded.map(channelName).joined(separator: ", ")
-            return .degraded(detail: names.isEmpty ? "채널 오류" : names)
+            return .degraded(detail: publicDetail(degraded.map(channelName), fallback: "채널 오류"))
         }
 
         // 🟢 if at least one channel is running and nothing above tripped.
         // NOTE: `disconnected` alone is normal between polls — never DOWN on it.
         let running = channelLines.filter { $0.lowercased().contains("running") }
         if !running.isEmpty {
-            let names = running.map(channelName).joined(separator: ", ")
-            return .ok(detail: names.isEmpty ? "정상" : names)
+            return .ok(detail: publicDetail(running.map(channelName), fallback: "정상"))
         }
 
         // Channels listed but only transient states (e.g. `disconnected`): the
@@ -173,6 +171,39 @@ enum Probe {
         return lower.contains("stopped")
             || lower.contains("health:not-running")
             || lower.contains("error:")
+    }
+
+    // MARK: Public detail
+
+    /// Longest channel name we publish verbatim. Real names are short
+    /// ("Telegram default"); anything longer smells like a token or an id.
+    static let maxPublicNameLength = 32
+
+    /// Joins channel names for the status file, which is public behind only an
+    /// unguessable path. openclaw's output format is not ours, so a "name" may
+    /// be a bot handle, an email or a token fragment — only names made of
+    /// letters (ASCII or Hangul), digits and ` ._-` go out verbatim; the rest
+    /// are only counted. Display text only: the verdict is decided before this.
+    static func publicDetail(_ names: [String], fallback: String) -> String {
+        let named = names.filter { !$0.isEmpty }
+        guard !named.isEmpty else { return fallback }
+        let shown = named.filter(isPublishableName)
+        let hidden = named.count - shown.count
+        if hidden == 0 { return shown.joined(separator: ", ") }
+        if shown.isEmpty { return "채널 \(hidden)개" }
+        return "\(shown.joined(separator: ", ")) 외 \(hidden)개"
+    }
+
+    static func isPublishableName(_ name: String) -> Bool {
+        guard (1...maxPublicNameLength).contains(name.count) else { return false }
+        return name.unicodeScalars.allSatisfy { s in
+            switch s.value {
+            case 0x30...0x39, 0x41...0x5A, 0x61...0x7A: return true // ASCII alnum
+            case 0xAC00...0xD7A3: return true // Hangul syllables
+            case 0x20, 0x2E, 0x5F, 0x2D: return true // space . _ -
+            default: return false
+            }
+        }
     }
 
     /// Best-effort channel name for display: text before the first `:`, sans

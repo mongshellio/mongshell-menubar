@@ -61,6 +61,26 @@ do {
     check("빈 출력 → down", v11 == .down, "\(v11)")
 }
 
+// MARK: - 공개 detail 필터
+
+print("▸ 공개 detail 필터")
+do {
+    // The status file is public; a bot handle must never reach it verbatim,
+    // and filtering must not change the verdict itself.
+    let bot = verdict("Gateway reachable.\n- @mongshell_bot: running\n")
+    check("봇 계정명 → 개수만", bot == .ok(detail: "채널 1개"), "\(bot)")
+    let mixed = verdict("Gateway reachable.\n- Telegram default: stopped\n- me@example.com: stopped\n")
+    check("허용 이름만 노출 + 나머지 개수", mixed == .degraded(detail: "Telegram default 외 1개"), "\(mixed)")
+    let long = String(repeating: "a", count: Probe.maxPublicNameLength + 1)
+    let tooLong = verdict("Gateway reachable.\n- \(long): running\n")
+    check("32자 초과 → 개수만", tooLong == .ok(detail: "채널 1개"), "\(tooLong)")
+    let edge = String(repeating: "a", count: Probe.maxPublicNameLength)
+    let atLimit = verdict("Gateway reachable.\n- \(edge): running\n")
+    check("32자 → 그대로", atLimit == .ok(detail: edge), "\(atLimit)")
+    let hangul = verdict("Gateway reachable.\n- 텔레그램 기본_1.x-y: running\n")
+    check("한글·허용 기호 → 그대로", hangul == .ok(detail: "텔레그램 기본_1.x-y"), "\(hangul)")
+}
+
 // MARK: - run() 타임아웃
 
 print("▸ run() 타임아웃")
