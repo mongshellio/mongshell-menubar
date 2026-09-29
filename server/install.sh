@@ -31,12 +31,7 @@ CURL_ATTEMPTS=6
 # 이 스크립트가 발급하는 형식(openssl rand -hex 16).
 TOKEN_PATTERN='^[0-9a-f]{32}$'
 
-# 에이전트(Options.defaultInterval/minimumInterval/maximumInterval)와 같은 값.
-DEFAULT_INTERVAL=60
-MIN_INTERVAL=15
-MAX_INTERVAL=86400
-DEFAULT_AUTO_HEAL=1
-# 명령줄에서 준 값. 비어 있으면 저장값 → 기본값 순으로 정한다.
+# 명령줄에서 준 값. 비어 있으면 저장값 → 기본값 순으로 정한다 (resolve_options).
 ARG_INTERVAL=""
 ARG_AUTO_HEAL=""
 ROTATE_TOKEN=0
@@ -55,32 +50,6 @@ usage() {
   -h, --help        이 도움말
 주기·자동복구는 저장돼, 다음 실행에서 생략하면 지난 값을 그대로 쓴다.
 EOF
-}
-
-# 명령줄과 저장 파일에 같은 규칙을 쓴다. 자릿수 상한을 먼저 걸어 산술 비교에서
-# 오버플로가 나지 않게 하고, 10# 으로 앞자리 0 을 8진수로 읽지 않게 한다.
-valid_interval() {
-  [[ "$1" =~ ^[0-9]{1,6}$ ]] && (( 10#$1 >= MIN_INTERVAL && 10#$1 <= MAX_INTERVAL ))
-}
-
-# $1=옵션 파일. 저장값을 SAVED_INTERVAL / SAVED_AUTO_HEAL 에 담는다 (없으면 빈 값).
-# key=value 줄을 파싱만 한다 — 파일 내용을 source 로 실행하지 않는다. 모르는 키는
-# 무시하고, 형식이 깨진 값은 경고 후 버려 기본값이 쓰이게 한다.
-load_saved_options() {
-  SAVED_INTERVAL=""
-  SAVED_AUTO_HEAL=""
-  [[ -f "$1" ]] || return 0
-  local key value
-  while IFS='=' read -r key value || [[ -n "$key" ]]; do
-    case "$key" in
-      interval)
-        if valid_interval "$value"; then SAVED_INTERVAL="$((10#$value))"
-        else warn "저장된 주기가 올바르지 않아 무시합니다 ($1): interval=$value"; fi ;;
-      auto_heal)
-        if [[ "$value" == 0 || "$value" == 1 ]]; then SAVED_AUTO_HEAL="$value"
-        else warn "저장된 자동복구 값이 올바르지 않아 무시합니다 ($1): auto_heal=$value"; fi ;;
-    esac
-  done <"$1"
 }
 
 # $1=옵션 파일, $2=주기, $3=자동복구(0/1). 임시 파일에 쓴 뒤 옮겨, 중간에 끊겨도
@@ -107,8 +76,7 @@ done
 # 명령줄 > 저장값 > 기본값. 여기서는 읽기만 하고, 저장은 새 에이전트가 이 값으로
 # 뜬 뒤에 한다 — 도중에 중단되면 돌던 에이전트와 저장값이 어긋나지 않게.
 load_saved_options "$OPTIONS_FILE"
-INTERVAL="${ARG_INTERVAL:-${SAVED_INTERVAL:-$DEFAULT_INTERVAL}}"
-AUTO_HEAL="${ARG_AUTO_HEAL:-${SAVED_AUTO_HEAL:-$DEFAULT_AUTO_HEAL}}"
+resolve_options
 
 # ── 1. 사전조건 ────────────────────────────────────────────────────────────
 step "사전조건 확인"
