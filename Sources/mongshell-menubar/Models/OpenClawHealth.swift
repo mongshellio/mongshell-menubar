@@ -17,8 +17,9 @@ enum OpenClawHealth: Equatable, Sendable {
     case ok(detail: String)
     /// Gateway OK but one or more channels are stopped/errored (🟡).
     case degraded(detail: String)
-    /// The server agent reported the gateway itself down (🔴).
-    case down
+    /// The server agent reported the gateway itself down (🔴), with its reason
+    /// when it gave one (e.g. the openclaw binary is missing).
+    case down(detail: String)
     /// No fresh word from the server agent (⚪️) — network, funnel, or the agent
     /// itself. Says nothing about the gateway.
     case unreachable(detail: String)
@@ -48,10 +49,11 @@ extension OpenClawHealth {
         }
     }
 
-    /// The channel summary or the reason we lost the server, when there is one.
+    /// The channel summary, the server's reason for down, or the reason we lost
+    /// the server, when there is one.
     var detailText: String? {
         switch self {
-        case .ok(let d), .degraded(let d), .unreachable(let d):
+        case .ok(let d), .degraded(let d), .down(let d), .unreachable(let d):
             return d.isEmpty ? nil : d
         default:
             return nil

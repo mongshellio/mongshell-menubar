@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # install.sh / uninstall.sh 공용: 공개 포트와 tailscale serve 설정 조회·경로 해제.
-# source 해서 쓴다. 호출 스크립트가 die() 를 정의해 둬야 한다.
+# 그리고 install.sh 의 설치 옵션 결정 규칙 — scripts/test.sh 가 source 해 시험할 수
+# 있도록 여기 둔다. source 해서 쓴다. 호출 스크립트가 die() / warn() 을 정의해 둬야 한다.
 
 # 공개 전용 포트. funnel 은 포트 단위로 인터넷에 여므로, 443 에 tailnet 전용으로 둔
 # 다른 serve 핸들러(대시보드 등)가 있으면 우리 경로와 함께 노출된다. 그래서 우리
@@ -68,4 +69,47 @@ unpublish_path() {
   if grep -qxF -- "$path" <<<"$handlers"; then
     die "해제 명령은 성공했지만 옛 공개 경로가 남아 있습니다. '$manual' 로 끈 뒤 다시 실행하세요."
   fi
+}
+
+# ── 설치 옵션 (install.sh) ─────────────────────────────────────────────────
+# 에이전트(Options.defaultInterval/minimumInterval/maximumInterval)와 같은 값.
+DEFAULT_INTERVAL=60
+MIN_INTERVAL=15
+MAX_INTERVAL=86400
+DEFAULT_AUTO_HEAL=1
+
+# 명령줄과 저장 파일에 같은 규칙을 쓴다. 자릿수 상한을 먼저 걸어 산술 비교에서
+# 오버플로가 나지 않게 하고, 10# 으로 앞자리 0 을 8진수로 읽지 않게 한다.
+valid_interval() {
+  [[ "$1" =~ ^[0-9]{1,6}$ ]] && (( 10#$1 >= MIN_INTERVAL && 10#$1 <= MAX_INTERVAL ))
+}
+
+# $1=옵션 파일. 저장값을 SAVED_INTERVAL / SAVED_AUTO_HEAL 에 담는다 (없으면 빈 값).
+# key=value 줄을 파싱만 한다 — 파일 내용을 source 로 실행하지 않는다. 모르는 키는
+# 무시하고, 형식이 깨진 값은 경고 후 버려 기본값이 쓰이게 한다.
+load_saved_options() {
+  SAVED_INTERVAL=""
+  SAVED_AUTO_HEAL=""
+  [[ -f "$1" ]] || return 0
+  if [[ ! -r "$1" ]]; then
+    warn "저장된 설치 옵션을 읽을 수 없어 기본값을 씁니다: $1"
+    return 0
+  fi
+  local key value
+  while IFS='=' read -r key value || [[ -n "$key" ]]; do
+    case "$key" in
+      interval)
+        if valid_interval "$value"; then SAVED_INTERVAL="$((10#$value))"
+        else warn "저장된 주기가 올바르지 않아 무시합니다 ($1): interval=$value"; fi ;;
+      auto_heal)
+        if [[ "$value" == 0 || "$value" == 1 ]]; then SAVED_AUTO_HEAL="$value"
+        else warn "저장된 자동복구 값이 올바르지 않아 무시합니다 ($1): auto_heal=$value"; fi ;;
+    esac
+  done <"$1"
+}
+
+# 명령줄(ARG_*) > 저장값(SAVED_*) > 기본값 으로 INTERVAL / AUTO_HEAL 을 정한다.
+resolve_options() {
+  INTERVAL="${ARG_INTERVAL:-${SAVED_INTERVAL:-$DEFAULT_INTERVAL}}"
+  AUTO_HEAL="${ARG_AUTO_HEAL:-${SAVED_AUTO_HEAL:-$DEFAULT_AUTO_HEAL}}"
 }

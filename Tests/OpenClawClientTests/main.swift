@@ -70,8 +70,25 @@ do {
 
     let downData = try! StatusFile.encode(AgentStatus(
         checkedAt: now, verdict: .down, intervalSeconds: 60, autoHeal: true, lastHeal: nil))
-    check("down(detail null) 왕복",
-          (try? OpenClawStatusClient.parse(data: downData))?.health == .down)
+    let downHealth = (try? OpenClawStatusClient.parse(data: downData))?.health
+    check("down(detail null) 왕복", downHealth == .down(detail: ""), "\(String(describing: downHealth))")
+    check("down detail 없음 → 표시 문구는 라벨만",
+          downHealth?.detailText == nil && downHealth?.settingsLabel == "게이트웨이 다운",
+          "\(String(describing: downHealth?.settingsLabel))")
+
+    // The agent reports a missing binary as `down` + a reason; the reason must
+    // reach the popover, or the operator can't tell it from a crashed gateway.
+    let missingData = try! StatusFile.encode(AgentStatus(
+        checkedAt: now, verdict: .notInstalled, intervalSeconds: 60, autoHeal: true, lastHeal: nil))
+    let missing = (try? OpenClawStatusClient.parse(data: missingData))?.health
+    check("down + detail 왕복 (바이너리 없음)",
+          missing == .down(detail: "openclaw 바이너리 없음")
+              && missing?.detailText == "openclaw 바이너리 없음"
+              && missing?.settingsLabel == "게이트웨이 다운 — openclaw 바이너리 없음",
+          "\(String(describing: missing))")
+    check("down + detail 도 빨강·같은 라벨",
+          missing?.dotColor == OpenClawHealth.down(detail: "").dotColor
+              && missing?.shortLabel == OpenClawHealth.down(detail: "").shortLabel)
 }
 
 // MARK: - 관대한 디코딩
@@ -134,6 +151,11 @@ do {
     check("detail 결합 문자 누적 → 스칼라 480 이하, 글자 단위로 자름",
           zalgoScalars <= OpenClawStatusClient.displayScalarLimit && zalgo?.count == 9,
           "\(zalgoScalars) scalars, \(String(describing: zalgo?.count)) chars")
+    let downDetail = detail("바이너리\n없음\t" + String(repeating: "가", count: 500), health: "down")
+    check("down detail 도 한 줄·120자로 정화",
+          downDetail?.hasPrefix("바이너리 없음") == true && downDetail?.contains("\n") == false
+              && downDetail?.count == OpenClawStatusClient.detailDisplayLimit,
+          "\(String(describing: downDetail?.prefix(12))), \(String(describing: downDetail?.count))")
     let odd = detail("", health: "re\nbooting")
     check("모르는 health 도 한 줄로", odd == "알 수 없는 상태: re booting", "\(String(describing: odd))")
 
@@ -207,15 +229,15 @@ do {
     } else { check("interval 120, 361초 전 → unreachable", false) }
     check("interval 누락 → 임계 180초", OpenClawReading.staleAfter(intervalSeconds: nil) == 180)
 
-    let down = reading(checkedSecondsAgo: 10, now: now, health: .down).health(now: now)
-    check("서버가 down 보고 → down (빨강)", down == .down)
+    let down = reading(checkedSecondsAgo: 10, now: now, health: .down(detail: "")).health(now: now)
+    check("서버가 down 보고 → down (빨강)", down == .down(detail: ""))
     var gone = OpenClawReading()
     gone.recordFailure(.offline)
     let offline = gone.health(now: now)
     check("응답 없음 → down 이 아니라 unreachable",
           offline == .unreachable(detail: "네트워크 연결 없음"), "\(offline)")
     check("unreachable 은 빨강이 아님",
-          OpenClawHealth.unreachable(detail: "").dotColor != OpenClawHealth.down.dotColor)
+          OpenClawHealth.unreachable(detail: "").dotColor != OpenClawHealth.down(detail: "").dotColor)
 
     var blip = reading(checkedSecondsAgo: 30, now: now)
     blip.recordFailure(.timedOut)
@@ -227,24 +249,24 @@ do {
 
     check("응답 전 → unknown", OpenClawReading().health(now: now) == .unknown)
 
-    var overlap = reading(checkedSecondsAgo: 10, now: now, health: .down)
+    var overlap = reading(checkedSecondsAgo: 10, now: now, health: .down(detail: ""))
     overlap.recordSuccess(OpenClawStatus(checkedAt: now.addingTimeInterval(-70), health: .ok(detail: "old"),
                                          intervalSeconds: 60, autoHeal: true, lastHeal: nil),
                           receivedAt: now)
-    check("늦게 도착한 옛 응답 → 상태 역행 없음", overlap.health(now: now) == .down,
+    check("늦게 도착한 옛 응답 → 상태 역행 없음", overlap.health(now: now) == .down(detail: ""),
           "\(overlap.health(now: now))")
 
     // Server clock set back: a step back beyond the stale threshold can't be
     // a late reply, so it becomes the new baseline instead of being dropped
     // until the clock catches up.
-    var smallStep = reading(checkedSecondsAgo: 0, now: now, health: .down)
+    var smallStep = reading(checkedSecondsAgo: 0, now: now, health: .down(detail: ""))
     let kept = smallStep.recordSuccess(OpenClawStatus(checkedAt: now.addingTimeInterval(-180),
                                                       health: .ok(detail: "old"), intervalSeconds: 60,
                                                       autoHeal: true, lastHeal: nil),
                                        receivedAt: now)
-    check("임계(180초) 이내 역행 → 무시", !kept && smallStep.health(now: now) == .down,
+    check("임계(180초) 이내 역행 → 무시", !kept && smallStep.health(now: now) == .down(detail: ""),
           "\(smallStep.health(now: now))")
-    var clockBack = reading(checkedSecondsAgo: 0, now: now, health: .down)
+    var clockBack = reading(checkedSecondsAgo: 0, now: now, health: .down(detail: ""))
     clockBack.recordFailure(.timedOut)
     let reset = clockBack.recordSuccess(OpenClawStatus(checkedAt: now.addingTimeInterval(-3600),
                                                        health: .ok(detail: "new"), intervalSeconds: 60,

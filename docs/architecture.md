@@ -85,13 +85,13 @@ UsageModel.pollLoop()  ──(@MainActor, Task)
 [맥북] 메뉴바 앱  OpenClawModel ──(주기 폴링, 기본 60초 · 최소 15초)
    └─ OpenClawStatusClient → HTTPS GET (ephemeral 세션, 캐시 무시, 타임아웃 10초, 리다이렉트 거부, 200 응답만 본문을 64KB 까지 읽음)
         └─ 관대한 디코딩 (detail 은 제어문자·줄바꿈 문자→공백, 120자·유니코드 스칼라 480개) → OpenClawReading (마지막 성공 응답 보관)
-             └─ OpenClawHealth: 🟢 ok / 🟡 degraded / 🔴 down(서버 보고) / ⚪️ unreachable
+             └─ OpenClawHealth: 🟢 ok / 🟡 degraded / 🔴 down(서버 보고) / ⚪️ unreachable  (서버 detail 은 ok·degraded·down 모두 팝오버·설정 상태 행에 표시)
    └─ lastHeal.at 이 지금까지 본 것보다 늦어짐 → "openclaw 자동 재시작됨 (서버)" / "openclaw 자동 재시작 실패 (서버)" 알림 (첫 응답은 기준점)
 ```
 
 - 게이트웨이 레이블은 설치 시 고정한다(`--gateway-label`). 에이전트 자신의 레이블은 탐색·명시 모두에서 제외된다.
 - 재시작 후에도 `status.json` 의 `lastHeal` 로 복구 쿨다운을 이어받는다.
-- 설치·제거는 `server/install.sh` / `server/uninstall.sh` (사용법: [server/README.md](../server/README.md)).
+- 설치·제거는 `server/install.sh` / `server/uninstall.sh` (사용법: [server/README.md](../server/README.md)). 설치 옵션(주기·자동복구)은 데이터 폴더의 `options` 파일(`key=value`, 실행하지 않고 파싱)에 저장돼, 재실행 때 명시하지 않은 옵션은 지난 값을 이어받는다.
 
 - **연락 두절(회색)** 판정은 마지막 **성공** 응답의 `checkedAt` 이 `max(180초, 3×intervalSeconds)` 를 넘었는가 하나다. 일시적 요청 실패는 마지막 성공이 신선한 동안 상태를 바꾸지 않는다. 빨강은 서버가 게이트웨이 다운을 보고했을 때만이다.
 - `checkedAt` 이 없거나 해석 불가한 문서는 실패로 취급한다. 미래 시각(서버 시계가 빠름)은 그 값을 처음 받은 시각으로 고정해 나이를 잰다. 서버 시계가 느리면 그만큼 일찍 두절로 판정된다.

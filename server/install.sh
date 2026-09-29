@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 서버 맥에 mongshell-openclaw-agent 를 설치하고 tailscale funnel 로 상태 파일을
-# 공개 HTTPS 주소에 올린다. 재실행해도 안전하다 (토큰 재사용, LaunchAgent 교체).
+# 공개 HTTPS 주소에 올린다. 재실행해도 안전하다 (토큰·옵션 재사용, LaunchAgent 교체).
 #
-# 사용법: server/install.sh [--interval N] [--no-auto-heal] [--rotate-token]
+# 사용법: server/install.sh [--interval N] [--auto-heal|--no-auto-heal] [--rotate-token]
 # 사전 준비(brew 판 Tailscale 설치·로그인·funnel 권한)는 server/README.md 참조.
 set -euo pipefail
 
@@ -18,6 +18,9 @@ DATA_DIR="$HOME/Library/Application Support/$PRODUCT"
 BIN="$DATA_DIR/$PRODUCT"
 STATUS_FILE="$DATA_DIR/status.json"
 TOKEN_FILE="$DATA_DIR/token"
+# 설치 옵션(주기·자동복구). 재실행 때 명시하지 않은 옵션은 여기서 이어받는다 —
+# README 의 업데이트 절차(git pull && install.sh)가 옵션을 되돌리지 않도록.
+OPTIONS_FILE="$DATA_DIR/options"
 PLIST="$HOME/Library/LaunchAgents/$SELF_LABEL.plist"
 LOG_FILE="$HOME/Library/Logs/$PRODUCT.log"
 DOMAIN="gui/$(id -u)"
@@ -28,11 +31,9 @@ CURL_ATTEMPTS=6
 # 이 스크립트가 발급하는 형식(openssl rand -hex 16).
 TOKEN_PATTERN='^[0-9a-f]{32}$'
 
-INTERVAL=""
-# 에이전트(Options.minimumInterval/maximumInterval)와 같은 범위.
-MIN_INTERVAL=15
-MAX_INTERVAL=86400
-AUTO_HEAL=1
+# 명령줄에서 준 값. 비어 있으면 저장값 → 기본값 순으로 정한다 (resolve_options).
+ARG_INTERVAL=""
+ARG_AUTO_HEAL=""
 ROTATE_TOKEN=0
 
 die()  { printf '\n오류: %s\n' "$*" >&2; exit 1; }
@@ -42,28 +43,44 @@ step() { printf '▶ %s\n' "$*"; }
 usage() {
   cat <<EOF
 사용법: $0 [옵션]
-  --interval N      probe 주기(초, 기본 60, $MIN_INTERVAL~$MAX_INTERVAL)
-  --no-auto-heal    게이트웨이 자동복구 끄기 (기본: 켬)
+  --interval N      probe 주기(초, 기본 $DEFAULT_INTERVAL, $MIN_INTERVAL~$MAX_INTERVAL)
+  --auto-heal       게이트웨이 자동복구 켜기 (기본)
+  --no-auto-heal    게이트웨이 자동복구 끄기
   --rotate-token    공개 URL 토큰을 새로 발급 (옛 URL 은 즉시 무효)
   -h, --help        이 도움말
+주기·자동복구는 저장돼, 다음 실행에서 생략하면 지난 값을 그대로 쓴다.
 EOF
+}
+
+# $1=옵션 파일, $2=주기, $3=자동복구(0/1). 임시 파일에 쓴 뒤 옮겨, 중간에 끊겨도
+# 반쯤 쓰인 파일이 남지 않게 한다.
+save_options() {
+  local tmp="$1.tmp.$$"
+  if printf 'interval=%s\nauto_heal=%s\n' "$2" "$3" >"$tmp" && mv -f "$tmp" "$1"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --interval)
-      # 자릿수 상한을 먼저 걸어 산술 비교에서 오버플로가 나지 않게 한다.
       [[ $# -ge 2 && "$2" =~ ^[0-9]{1,6}$ ]] || die "--interval 에는 6자리 이하 정수(초)가 필요합니다"
-      # 10# — 앞자리 0 을 8진수로 읽지 않도록.
-      (( 10#$2 >= MIN_INTERVAL && 10#$2 <= MAX_INTERVAL )) \
-        || die "--interval 은 $MIN_INTERVAL~$MAX_INTERVAL 초여야 합니다: $2"
-      INTERVAL="$((10#$2))"; shift 2 ;;
-    --no-auto-heal) AUTO_HEAL=0; shift ;;
+      valid_interval "$2" || die "--interval 은 $MIN_INTERVAL~$MAX_INTERVAL 초여야 합니다: $2"
+      ARG_INTERVAL="$((10#$2))"; shift 2 ;;
+    --auto-heal) ARG_AUTO_HEAL=1; shift ;;
+    --no-auto-heal) ARG_AUTO_HEAL=0; shift ;;
     --rotate-token) ROTATE_TOKEN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "알 수 없는 인자: $1" ;;
   esac
 done
+
+# 명령줄 > 저장값 > 기본값. 여기서는 읽기만 하고, 저장은 새 에이전트가 이 값으로
+# 뜬 뒤에 한다 — 도중에 중단되면 돌던 에이전트와 저장값이 어긋나지 않게.
+load_saved_options "$OPTIONS_FILE"
+resolve_options
 
 # ── 1. 사전조건 ────────────────────────────────────────────────────────────
 step "사전조건 확인"
@@ -187,12 +204,9 @@ echo "  → $GATEWAY_LABEL"
 step "LaunchAgent 등록"
 xml_escape() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
 
-EXTRA_ARGS=""
-if [[ -n "$INTERVAL" ]]; then
-  EXTRA_ARGS+="    <string>--interval</string>
+EXTRA_ARGS="    <string>--interval</string>
     <string>$INTERVAL</string>
 "
-fi
 if [[ $AUTO_HEAL -eq 0 ]]; then
   EXTRA_ARGS+="    <string>--no-auto-heal</string>
 "
@@ -235,6 +249,8 @@ for _ in 1 2 3 4 5; do
   sleep 1
 done
 [[ $bootstrapped -eq 1 ]] || die "launchctl bootstrap 실패. 'launchctl bootstrap $DOMAIN \"$PLIST\"' 를 직접 실행해 원인을 확인하세요."
+save_options "$OPTIONS_FILE" "$INTERVAL" "$AUTO_HEAL" \
+  || warn "설치 옵션을 저장하지 못했습니다 — 다음 재실행은 옵션을 다시 줘야 합니다: $OPTIONS_FILE"
 
 # ── 7. 첫 상태 파일 대기 ───────────────────────────────────────────────────
 step "첫 상태 파일 대기 (최대 ${STATUS_WAIT_SECONDS}s)"
@@ -315,7 +331,7 @@ cat <<EOF
 설치 완료.
   상태 URL : $URL
   로그     : $LOG_FILE
-  자동복구 : $([[ $AUTO_HEAL -eq 1 ]] && echo 켬 || echo 끔) (대상 $GATEWAY_LABEL)
+  옵션     : 주기 ${INTERVAL}초, 자동복구 $([[ $AUTO_HEAL -eq 1 ]] && echo 켬 || echo 끔) (대상 $GATEWAY_LABEL)
 
 위 상태 URL 을 메뉴바 앱 설정의 openclaw 섹션에 붙여넣으세요.
 EOF

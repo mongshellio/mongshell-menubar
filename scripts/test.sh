@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the regression tests: Claude Code settings, the openclaw server agent,
-# then the app's openclaw status client.
+# the app's openclaw status client, then server/install.sh's option rules.
 #
 # Not `swift test`: that needs XCTest or swift-testing, and neither ships with
 # the Command Line Tools this project builds against (no Xcode required is a
@@ -55,3 +55,7 @@ swiftc -o "$OUT/client-tests" \
 
 echo "▶ running openclaw client tests"
 "$OUT/client-tests"
+
+# Plain bash: sources the real server/lib.sh, exits non-zero on any failure.
+echo "▶ running server install option tests"
+bash "$ROOT/Tests/ServerOptionsTests/main.sh"

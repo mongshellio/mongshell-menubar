@@ -214,7 +214,7 @@ struct OpenClawStatusClient: Sendable {
         switch name as? String {
         case "ok":       return .ok(detail: detail)
         case "degraded": return .degraded(detail: detail)
-        case "down":     return .down
+        case "down":     return .down(detail: detail)
         case let other?:
             // Something the agent knows and we don't — not provably healthy,
             // not provably down. Amber, with the raw word so it's diagnosable.
