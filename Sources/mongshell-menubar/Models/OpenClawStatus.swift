@@ -65,8 +65,7 @@ struct OpenClawReading: Equatable, Sendable {
 
     func health(now: Date) -> OpenClawHealth {
         if let success = lastSuccess {
-            // A checkedAt in the future (clock skew) counts as age 0.
-            let age = max(0, now.timeIntervalSince(success.checkedAt))
+            let age = now.timeIntervalSince(success.checkedAt)
             if age <= Self.staleAfter(intervalSeconds: success.intervalSeconds) {
                 return success.health
             }
