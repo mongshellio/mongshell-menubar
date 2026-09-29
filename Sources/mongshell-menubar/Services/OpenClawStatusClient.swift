@@ -130,9 +130,15 @@ struct OpenClawStatusClient: Sendable {
 
     /// Reads the body, giving up with `.badResponse` as soon as it's known to
     /// pass `maxResponseBytes` — from the declared length when there is one,
-    /// otherwise while streaming.
+    /// otherwise while streaming. A non-200 answer is returned without its
+    /// body: `interpret` doesn't need it, and a large error page must still
+    /// surface as its status code (404 → the token hint), not as `.badResponse`.
     private static func download(_ req: URLRequest) async throws -> (Data, URLResponse) {
         let (bytes, response) = try await session.bytes(for: req)
+        if let http = response as? HTTPURLResponse, !readsBody(statusCode: http.statusCode) {
+            bytes.task.cancel()
+            return (Data(), response)
+        }
         guard !exceedsSizeLimit(response.expectedContentLength) else {
             bytes.task.cancel()
             throw OpenClawStatusError.badResponse
@@ -148,6 +154,14 @@ struct OpenClawStatusClient: Sendable {
         return (data, response)
     }
 
+    /// Only a 200 carries a status document; every other code is judged on
+    /// the code alone.
+    static func readsBody(statusCode: Int) -> Bool {
+        statusCode == okStatusCode
+    }
+
+    private static let okStatusCode = 200
+
     /// Whether a byte count is over the cap. An unknown length (-1) isn't.
     static func exceedsSizeLimit(_ byteCount: Int64) -> Bool {
         byteCount > maxResponseBytes
@@ -157,7 +171,7 @@ struct OpenClawStatusClient: Sendable {
     /// is testable without a server.
     static func interpret(statusCode: Int, data: Data) throws(OpenClawStatusError) -> OpenClawStatus {
         switch statusCode {
-        case 200: return try parse(data: data)
+        case okStatusCode: return try parse(data: data)
         case 404: throw .notFound
         default:  throw .http(statusCode)
         }

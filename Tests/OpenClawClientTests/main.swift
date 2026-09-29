@@ -149,6 +149,11 @@ do {
           r.health(now: now) == .unreachable(detail: "주소 또는 토큰이 맞지 않습니다"))
     check("500 → http(500)", interpret(500) == .http(500))
     check("302(리다이렉트 거부 결과) → http(302)", interpret(302) == .http(302))
+    // Non-200 bodies are never read, so a large error page can't hit the size
+    // cap and hide its status code (404 → token hint) behind badResponse.
+    check("200 만 본문 읽음", OpenClawStatusClient.readsBody(statusCode: 200))
+    check("404·500 은 본문 안 읽음",
+          !OpenClawStatusClient.readsBody(statusCode: 404) && !OpenClawStatusClient.readsBody(statusCode: 500))
 
     check("URLError.cancelled → cancelled", OpenClawStatusError.transport(.cancelled) == .cancelled)
     check("URLError.timedOut → timedOut", OpenClawStatusError.transport(.timedOut) == .timedOut)
