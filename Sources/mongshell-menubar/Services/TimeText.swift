@@ -39,6 +39,29 @@ enum TimeText {
         return fmt.string(from: date)
     }
 
+    /// When the openclaw server agent last checked, e.g. "14:32". A stale reading
+    /// also gets its age ("14:32 · 23분 전") so an old time can't pass for a
+    /// current one at a glance; another day gets its date ("9/28 14:32").
+    /// nil when there has been no successful read.
+    static func checkedClock(_ date: Date?, stale: Bool, now: Date = Date()) -> String? {
+        guard let date else { return nil }
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "ko_KR")
+        fmt.dateFormat = Calendar.current.isDate(date, inSameDayAs: now) ? "HH:mm" : "M/d HH:mm"
+        let clock = fmt.string(from: date)
+        guard stale else { return clock }
+        return "\(clock) · \(ago(date, now: now))"
+    }
+
+    /// "23분 전" / "3시간 전" / "2일 전".
+    private static func ago(_ date: Date, now: Date) -> String {
+        let minutes = max(0, Int(now.timeIntervalSince(date)) / 60)
+        if minutes < 60 { return "\(minutes)분 전" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours)시간 전" }
+        return "\(hours / 24)일 전"
+    }
+
     /// Absolute clock time of the last successful fetch, e.g. "오후 2:32 갱신".
     /// Empty for the sentinel `.distantPast` (sample data).
     static func updatedClock(_ date: Date) -> String {

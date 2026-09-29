@@ -8,7 +8,6 @@ struct SettingsView: View {
     @ObservedObject var loginItem: LoginItemModel
 
     private let intervals = [180, 300, 600, 900]
-    private let openClawIntervals = [30, 60, 120]
 
     /// Mirrors the live menu bar (same `showsOpenClaw` rule).
     private var openClawPreviewColor: Color? {
@@ -66,7 +65,7 @@ struct SettingsView: View {
             }
 
             Section("openclaw") {
-                openClawSection
+                OpenClawSettingsSection(prefs: prefs, openClaw: openClaw)
             }
 
             Section("계정") {
@@ -75,42 +74,6 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 380, height: 700)
-    }
-
-    /// openclaw controls. When openclaw isn't installed, the picker is locked
-    /// to `Claude만` and everything else is hidden behind an explanatory note.
-    @ViewBuilder private var openClawSection: some View {
-        let installed = prefs.openClawStatusURLValue != nil
-
-        Picker("메뉴바 표시", selection: $prefs.menuBarTargetRaw) {
-            ForEach(MenuBarTarget.allCases, id: \.rawValue) { target in
-                Text(target.displayName).tag(target.rawValue)
-            }
-        }
-        .disabled(!installed)
-
-        if !installed {
-            Text("openclaw가 설치되어 있지 않습니다")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        } else {
-            LabeledContent("상태") {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(openClaw.health.dotColor)
-                        .frame(width: 8, height: 8)
-                    Text(openClaw.health.settingsLabel)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Picker("openclaw 확인 간격", selection: $prefs.openClawPollSeconds) {
-                ForEach(openClawIntervals, id: \.self) { s in
-                    Text("\(s)초").tag(s)
-                }
-            }
-            .disabled(prefs.menuBarTarget == .claudeOnly)
-        }
     }
 
     @ViewBuilder private var accountRow: some View {

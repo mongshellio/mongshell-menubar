@@ -60,10 +60,17 @@ struct PopoverView: View {
                     .foregroundStyle(Palette.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Button("새로고침") { openClaw.refreshNow() }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .frame(maxWidth: .infinity)
+            // Read-only by design (Decision #25): restarts happen on the server.
+            HStack(spacing: 8) {
+                Text(openClaw.checkedClockText.map { "서버 확인 \($0)" } ?? "서버 확인 기록 없음")
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .foregroundStyle(Palette.textTertiary)
+                Spacer(minLength: 8)
+                Button("새로고침") { openClaw.refreshNow() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
         }
         .padding(.horizontal, 18)
         .padding(.top, 15)
