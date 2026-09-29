@@ -126,6 +126,14 @@ do {
     let long = detail(String(repeating: "가", count: 500))
     check("detail 120자로 자름", long?.count == OpenClawStatusClient.detailDisplayLimit,
           "\(String(describing: long?.count))")
+    let separators = detail("a\u{2028}b\u{2029}c\u{85}d")
+    check("detail U+2028/2029·NEL → 공백", separators == "a b c d", "\(String(describing: separators))")
+    // One character with 50 combining marks: short in characters, not in scalars.
+    let zalgo = detail(String(repeating: "a" + String(repeating: "\u{0301}", count: 50), count: 20))
+    let zalgoScalars = zalgo?.unicodeScalars.count ?? .max
+    check("detail 결합 문자 누적 → 스칼라 480 이하, 글자 단위로 자름",
+          zalgoScalars <= OpenClawStatusClient.displayScalarLimit && zalgo?.count == 9,
+          "\(zalgoScalars) scalars, \(String(describing: zalgo?.count)) chars")
     let odd = detail("", health: "re\nbooting")
     check("모르는 health 도 한 줄로", odd == "알 수 없는 상태: re booting", "\(String(describing: odd))")
 

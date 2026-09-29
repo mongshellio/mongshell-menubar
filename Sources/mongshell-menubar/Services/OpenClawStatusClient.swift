@@ -224,13 +224,29 @@ struct OpenClawStatusClient: Sendable {
         }
     }
 
-    /// Remote text made safe to show on one line: control characters (line
-    /// breaks included) become spaces, then it's cut to `limit` characters.
+    /// Scalars kept per displayed text, on top of the character limit: one
+    /// character can stack any number of combining marks ("Zalgo" text), so a
+    /// character count alone doesn't bound what gets drawn.
+    static let displayScalarLimit = 480
+    /// Replaced by a space: control characters plus every line break —
+    /// U+2028/U+2029 aren't control characters but still break the line.
+    private static let lineBreaking = CharacterSet.controlCharacters.union(.newlines)
+
+    /// Remote text made safe to show on one line: control characters and line
+    /// breaks become spaces, then it's cut to `limit` characters and at most
+    /// `displayScalarLimit` scalars.
     private static func displayText(_ raw: String, limit: Int) -> String {
         let flattened = String(String.UnicodeScalarView(raw.unicodeScalars.map {
-            CharacterSet.controlCharacters.contains($0) ? " " : $0
+            lineBreaking.contains($0) ? " " : $0
         }))
-        return String(flattened.trimmingCharacters(in: .whitespaces).prefix(limit))
+        var kept = ""
+        var scalarCount = 0
+        for character in flattened.trimmingCharacters(in: .whitespaces).prefix(limit) {
+            scalarCount += character.unicodeScalars.count
+            if scalarCount > displayScalarLimit { break }
+            kept.append(character)
+        }
+        return kept
     }
 
     private static func healEvent(_ any: Any?) -> OpenClawHealEvent? {
