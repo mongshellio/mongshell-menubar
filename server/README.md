@@ -31,16 +31,23 @@ sudo tailscale set --operator=$USER
 
 1. **DNS** 탭 → MagicDNS 켜기
 2. **DNS** 탭 → HTTPS Certificates 켜기
-3. **Access controls** (정책 파일) 에 funnel 권한 추가:
+3. **Access controls** (정책 파일) 에 funnel 권한 추가 — 서버 기기에만 준다:
 
 ```jsonc
+"tagOwners": {
+  "tag:openclaw-server": ["autogroup:admin"]
+},
 "nodeAttrs": [
   {
-    "target": ["autogroup:member"],   // 또는 서버 기기만 지정
+    "target": ["tag:openclaw-server"],
     "attr":   ["funnel"]
   }
+  // 대안(범위가 넓음): 태그 없이 모든 멤버 기기에 허용하려면
+  // "target": ["autogroup:member"]
 ]
 ```
+
+4. **Machines** 탭 → 서버 맥의 `⋯` → **Edit ACL tags** 에서 `tag:openclaw-server` 를 붙인다.
 
 ### 3. 서버 맥 상시 가동
 
@@ -56,12 +63,12 @@ repo 를 서버 맥에 클론한 뒤:
 
 ```bash
 server/install.sh                     # 기본: 60초 주기, 자동복구 켬
-server/install.sh --interval 30       # 주기 변경 (최소 15초)
+server/install.sh --interval 30       # 주기 변경 (15~86400초)
 server/install.sh --no-auto-heal      # 자동복구 끄기 (상태 보고만)
 server/install.sh --rotate-token      # URL 토큰 재발급 — 옛 URL 은 즉시 무효
 ```
 
-마지막에 출력되는 `https://…:8443/<토큰>` URL 을 메뉴바 앱 설정에 붙여넣는다. 재실행은 안전하다 — 토큰은 재사용되고 LaunchAgent 만 교체된다 (코드 업데이트 후 `git pull && server/install.sh`).
+마지막에 출력되는 `https://…:8443/<토큰>` URL 을 메뉴바 앱 설정에 붙여넣는다 (앱 측 원격 URL 지원은 후속 버전에서 추가). 재실행은 안전하다 — 토큰은 재사용되고 LaunchAgent 만 교체된다 (코드 업데이트 후 `git pull && server/install.sh`).
 
 설치되는 것:
 
@@ -92,6 +99,12 @@ funnel 경로·LaunchAgent·데이터 폴더를 지운다. Tailscale 자체와 �
    ```
 2. 1분쯤 뒤 새로고침 → `checkedAt` 이 갱신돼야 한다.
 3. 토큰 없이 `https://<서버 DNS 이름>:8443/` 를 열면 **404** 여야 한다 (토큰 경로만 공개). 설치 스크립트도 끝에 이것을 확인한다 — 404 가 아니라 2xx/3xx 면 중단, 이 맥에서 닿지 않으면 경고만 한다.
+
+## 알려진 한계
+
+- **서버 맥에서 메뉴바 앱도 쓴다면 앱의 openclaw 자동복구는 끈다.** 앱과 이 에이전트가 같은 게이트웨이를 각자 재시작해 이중 복구가 된다.
+- **status.json 심링크 바꿔치기.** funnel 은 root 인 tailscaled 가 경로의 파일을 서빙한다. 이 사용자 권한을 이미 가진 공격자가 `status.json`(또는 데이터 폴더)을 다른 파일로 가는 심링크로 바꾸면, 에이전트의 다음 쓰기(원자적 교체라 링크를 덮어쓴다)까지 그 대상 파일이 공개 URL 로 나갈 수 있다. 사용자 권한 탈취가 전제라 별도 방어는 두지 않는다.
+- **파일 모드 설정 전 짧은 틈.** 상태 파일은 임시 파일 교체 뒤 0644 로 모드를 고정하는데, 그 사이 잠깐은 umask 를 따른다. umask 가 느슨하면 그 틈에 다른 로컬 사용자가 쓸 수 있다. 서버 맥은 1인 사용을 전제로 한다.
 
 ## 문제 해결
 

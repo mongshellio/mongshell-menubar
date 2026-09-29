@@ -310,5 +310,5 @@ cat <<EOF
   로그     : $LOG_FILE
   자동복구 : $([[ $AUTO_HEAL -eq 1 ]] && echo 켬 || echo 끔) (대상 $GATEWAY_LABEL)
 
-위 상태 URL 을 메뉴바 앱 설정에 붙여넣으세요.
+위 상태 URL 을 메뉴바 앱 설정에 붙여넣으세요 (앱 측 원격 URL 지원은 후속 버전에서 추가).
 EOF
