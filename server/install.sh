@@ -155,6 +155,10 @@ BUILT="$(swift build -c release --package-path "$ROOT" --show-bin-path)/$PRODUCT
 mkdir -p "$DATA_DIR" "$(dirname "$PLIST")" "$(dirname "$LOG_FILE")"
 # 실행 중인 바이너리를 덮어쓰지 않도록 먼저 에이전트를 내린다.
 launchctl bootout "$DOMAIN/$SELF_LABEL" 2>/dev/null || true
+# 옛 에이전트의 마지막 쓰기와 같은 초에 걸리지 않도록 1초 넘긴 뒤 기준 시각을 잡는다
+# (mtime 은 초 단위). 이후의 status.json 쓰기는 새 에이전트의 것이다.
+sleep 1
+INSTALL_STARTED="$(date +%s)"
 install -m 0755 "$BUILT" "$BIN"
 echo "  → $BIN"
 
@@ -223,8 +227,6 @@ $EXTRA_ARGS  </array>
 EOF
 plutil -lint "$PLIST" >/dev/null || die "생성한 plist 가 올바르지 않습니다: $PLIST"
 
-# 이전 실행이 남긴 파일로 "대기 성공" 을 착각하지 않도록 지운다.
-rm -f "$STATUS_FILE"
 # bootout 직후 bootstrap 은 서비스가 완전히 내려가기 전이면 실패(EIO)하므로 재시도.
 bootstrapped=0
 for _ in 1 2 3 4 5; do
@@ -236,7 +238,13 @@ done
 # ── 7. 첫 상태 파일 대기 ───────────────────────────────────────────────────
 step "첫 상태 파일 대기 (최대 ${STATUS_WAIT_SECONDS}s)"
 waited=0
-until [[ -s "$STATUS_FILE" ]]; do
+# 재설치면 이전 실행의 status.json 이 남아 있다. 지우면 그 안의 lastHeal(복구
+# 쿨다운)까지 사라져 재설치 직후 곧바로 재시작이 다시 걸릴 수 있으므로 두고,
+# 설치 시작 이후에 다시 쓰였는지를 mtime 으로 본다.
+status_written_since_install() {
+  [[ -s "$STATUS_FILE" ]] && (( $(stat -f %m "$STATUS_FILE") >= INSTALL_STARTED ))
+}
+until status_written_since_install; do
   if (( waited >= STATUS_WAIT_SECONDS )); then
     die "상태 파일이 생기지 않았습니다. 로그 확인: $LOG_FILE"
   fi
