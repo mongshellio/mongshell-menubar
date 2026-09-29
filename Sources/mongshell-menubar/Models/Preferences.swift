@@ -39,7 +39,7 @@ final class Preferences: ObservableObject {
 
     /// 저장된 상태 URL 을 검증한 값. 형식이 깨진 값은 미설정으로 본다.
     var openClawStatusURLValue: URL? {
-        (try? OpenClawStatusClient.validatedURL(openClawStatusURL)) ?? nil
+        try? OpenClawStatusClient.validatedURL(openClawStatusURL)
     }
 
     /// openclaw 요소(메뉴바 신호등·팝오버 섹션)를 보일지의 단일 판정. 표시 조건을
