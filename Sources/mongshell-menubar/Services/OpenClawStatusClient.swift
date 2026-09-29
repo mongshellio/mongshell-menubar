@@ -82,7 +82,9 @@ struct OpenClawStatusClient: Sendable {
 
     /// Normalizes user input. Empty (after trimming) → nil, meaning "not
     /// configured". Only `https` is accepted: the path carries the token, and
-    /// the agent is only ever published over HTTPS.
+    /// the agent is only ever published over HTTPS. Userinfo is refused: the
+    /// agent never needs it, and `https://a.ts.net@evil.com/…` reads like a
+    /// tailnet host while actually pointing at `evil.com`.
     static func validatedURL(_ raw: String) throws(OpenClawURLError) -> URL? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return nil }
@@ -91,6 +93,7 @@ struct OpenClawStatusClient: Sendable {
         }
         guard scheme.lowercased() == "https" else { throw .notHTTPS }
         guard let host = url.host, !host.isEmpty else { throw .malformed }
+        guard url.user == nil, url.password == nil else { throw .malformed }
         return url
     }
 
