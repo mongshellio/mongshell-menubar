@@ -220,6 +220,33 @@ do {
                           receivedAt: now)
     check("늦게 도착한 옛 응답 → 상태 역행 없음", overlap.health(now: now) == .down,
           "\(overlap.health(now: now))")
+
+    // Server clock set back: a step back beyond the stale threshold can't be
+    // a late reply, so it becomes the new baseline instead of being dropped
+    // until the clock catches up.
+    var smallStep = reading(checkedSecondsAgo: 0, now: now, health: .down)
+    let kept = smallStep.recordSuccess(OpenClawStatus(checkedAt: now.addingTimeInterval(-180),
+                                                      health: .ok(detail: "old"), intervalSeconds: 60,
+                                                      autoHeal: true, lastHeal: nil),
+                                       receivedAt: now)
+    check("임계(180초) 이내 역행 → 무시", !kept && smallStep.health(now: now) == .down,
+          "\(smallStep.health(now: now))")
+    var clockBack = reading(checkedSecondsAgo: 0, now: now, health: .down)
+    clockBack.recordFailure(.timedOut)
+    let reset = clockBack.recordSuccess(OpenClawStatus(checkedAt: now.addingTimeInterval(-3600),
+                                                       health: .ok(detail: "new"), intervalSeconds: 60,
+                                                       autoHeal: true, lastHeal: nil),
+                                        receivedAt: now.addingTimeInterval(60))
+    check("임계 넘는 역행 → 새 기준으로 수용 (실패 이유 해제)",
+          reset && clockBack.lastFailure == nil && clockBack.lastCheckedAt == now.addingTimeInterval(-3600)
+              && clockBack.health(now: now.addingTimeInterval(-3600)) == .ok(detail: "new"),
+          "\(String(describing: clockBack.lastCheckedAt))")
+    let next = clockBack.recordSuccess(OpenClawStatus(checkedAt: now.addingTimeInterval(-3540),
+                                                      health: .ok(detail: "next"), intervalSeconds: 60,
+                                                      autoHeal: true, lastHeal: nil),
+                                       receivedAt: now.addingTimeInterval(120))
+    check("재기준 후 다음 응답 → 정상 갱신",
+          !next && clockBack.lastSuccess?.health == .ok(detail: "next"))
 }
 
 // MARK: - URL 검증
@@ -263,6 +290,13 @@ do {
     check("새 복구 — 알림", late.observe(h2) == h2)
     check("옛 복구가 늦게 도착 — 알림 없음", late.observe(h1) == nil)
     check("그 뒤 최신 복구 재수신 — 알림 없음", late.observe(h2) == nil)
+
+    // Server clock set back: heals on the new clock are all "older" than h2.
+    let h3 = OpenClawHealEvent(at: now.addingTimeInterval(-7200), ok: true, reason: "down")
+    let h4 = OpenClawHealEvent(at: now.addingTimeInterval(-7100), ok: true, reason: "down")
+    late.resetBaseline()
+    check("시계 역행 후 재기준 — 알림 없음", late.observe(h3) == nil)
+    check("재기준 뒤 새 복구 — 알림", late.observe(h4) == h4)
 }
 
 // MARK: - 시각 표기

@@ -55,13 +55,28 @@ struct OpenClawReading: Equatable, Sendable {
     /// Keeps `status` as the latest answer — unless it's older than the one we
     /// have: polls can overlap (a manual refresh during a slow poll), and a
     /// late reply must not roll the state back.
-    mutating func recordSuccess(_ status: OpenClawStatus, receivedAt: Date) {
-        if let last = lastSuccess, status.checkedAt < last.checkedAt { return }
+    ///
+    /// A step back wider than the staleness threshold is not a late reply —
+    /// one of those trails by a request timeout at most — but the server clock
+    /// having been set back. Ignoring it would drop every answer until the
+    /// clock caught up again, so it's taken as the new baseline instead.
+    /// Returns whether that happened, so the caller can re-baseline whatever
+    /// else it compares on the server's clock (the command/query exception
+    /// in code-standards).
+    @discardableResult
+    mutating func recordSuccess(_ status: OpenClawStatus, receivedAt: Date) -> Bool {
+        var clockWentBack = false
+        if let last = lastSuccess, status.checkedAt < last.checkedAt {
+            let stepBack = last.checkedAt.timeIntervalSince(status.checkedAt)
+            guard stepBack > Self.staleAfter(intervalSeconds: status.intervalSeconds) else { return false }
+            clockWentBack = true
+        }
         if status.checkedAt != lastSuccess?.checkedAt {
             lastCheckedAt = min(status.checkedAt, receivedAt)
         }
         lastSuccess = status
         lastFailure = nil
+        return clockWentBack
     }
 
     /// Remembers why the latest request failed. A cancellation is ignored: we
@@ -111,5 +126,14 @@ struct OpenClawHealWatch: Equatable, Sendable {
         guard let heal, heal.at > (lastSeenAt ?? .distantPast) else { return nil }
         lastSeenAt = heal.at
         return hadBaseline ? heal : nil
+    }
+
+    /// Forgets what was seen, so the next `observe` only sets a baseline —
+    /// for when the server clock went back and `lastHeal.at` values on either
+    /// side of the jump can no longer be ordered. A heal that happened across
+    /// the jump then goes unannounced: missing one notification is safer than
+    /// announcing an old heal as new.
+    mutating func resetBaseline() {
+        self = OpenClawHealWatch()
     }
 }

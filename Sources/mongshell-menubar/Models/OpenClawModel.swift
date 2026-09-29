@@ -108,7 +108,7 @@ final class OpenClawModel: ObservableObject {
 
         switch outcome {
         case .success(let status):
-            reading.recordSuccess(status, receivedAt: Date())
+            if reading.recordSuccess(status, receivedAt: Date()) { healWatch.resetBaseline() }
             if let heal = healWatch.observe(status.lastHeal) { notifyHeal(heal) }
         case .failure(let error):
             reading.recordFailure(error)
