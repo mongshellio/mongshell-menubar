@@ -22,7 +22,8 @@ final class OpenClawModel: ObservableObject {
     /// and the read-only auto-heal row.
     @Published private(set) var reading = OpenClawReading()
 
-    /// "서버 확인 HH:mm", with its age appended once the reading is stale.
+    /// The last check time ("오후 2:32"), with its age appended once the reading
+    /// is stale.
     var checkedClockText: String? {
         let stale: Bool
         if case .unreachable = health { stale = true } else { stale = false }
