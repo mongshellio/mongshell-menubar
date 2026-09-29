@@ -66,6 +66,10 @@ struct OpenClawStatusClient: Sendable {
     /// network problem, and the next poll will try again.
     static let requestTimeout: TimeInterval = 10
 
+    /// Largest status document read. The agent's is a few hundred bytes; the
+    /// cap keeps whatever answers at that address from filling memory.
+    static let maxResponseBytes: Int64 = 64 * 1024
+
     /// Ephemeral + no cache: every poll must see the file as it is now — a
     /// cached copy would look fresh while the agent is dead. Nothing (cookies,
     /// the token-bearing URL in a cache DB) is persisted to disk either.
@@ -107,7 +111,9 @@ struct OpenClawStatusClient: Sendable {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await Self.session.data(for: req)
+            (data, response) = try await Self.download(req)
+        } catch let error as OpenClawStatusError {
+            throw error
         } catch let error as URLError {
             throw .transport(error.code)
         } catch is CancellationError {
@@ -120,6 +126,31 @@ struct OpenClawStatusClient: Sendable {
         // between us and the agent rewrote the request — don't trust it.
         guard http.url?.host?.lowercased() == url.host?.lowercased() else { throw .badResponse }
         return try Self.interpret(statusCode: http.statusCode, data: data)
+    }
+
+    /// Reads the body, giving up with `.badResponse` as soon as it's known to
+    /// pass `maxResponseBytes` — from the declared length when there is one,
+    /// otherwise while streaming.
+    private static func download(_ req: URLRequest) async throws -> (Data, URLResponse) {
+        let (bytes, response) = try await session.bytes(for: req)
+        guard !exceedsSizeLimit(response.expectedContentLength) else {
+            bytes.task.cancel()
+            throw OpenClawStatusError.badResponse
+        }
+        var data = Data()
+        for try await byte in bytes {
+            data.append(byte)
+            if exceedsSizeLimit(Int64(data.count)) {
+                bytes.task.cancel()
+                throw OpenClawStatusError.badResponse
+            }
+        }
+        return (data, response)
+    }
+
+    /// Whether a byte count is over the cap. An unknown length (-1) isn't.
+    static func exceedsSizeLimit(_ byteCount: Int64) -> Bool {
+        byteCount > maxResponseBytes
     }
 
     /// Status code → document or error. Split from `fetch` so the 404 mapping
