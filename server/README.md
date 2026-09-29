@@ -49,7 +49,8 @@ openclaw 게이트웨이가 24시간 도는 **서버 맥**에 설치하는 감�
 - [ ] **openclaw 가 서버 맥에서 이미 launchd 로 돌고 있을 것**, 그리고 아래 두 조건을 만족할 것 (에이전트가 이 경로·위치만 본다)
   - 바이너리가 `/opt/homebrew/bin/openclaw` 또는 `/usr/local/bin/openclaw` 에 있다
   - 게이트웨이가 **에이전트를 설치할 같은 사용자**의 `~/Library/LaunchAgents/` 에 plist 로 등록돼 있고, 파일 이름에 `claw` 가 들어 있다 (openclaw 기본 레이블: `ai.openclaw.gateway`)
-  - 확인: `ls -l /opt/homebrew/bin/openclaw /usr/local/bin/openclaw; ls ~/Library/LaunchAgents | grep -i claw`
+  - 그 plist 의 **파일 이름(확장자 제외)이 plist 안의 `Label` 과 같을 것** — 에이전트는 파일 이름을 레이블로 보고 `launchctl kickstart` 한다
+  - 확인: `ls -l /opt/homebrew/bin/openclaw /usr/local/bin/openclaw; ls ~/Library/LaunchAgents | grep -i claw` — 바이너리는 둘 중 하나만 보이면 정상이다 (다른 쪽의 `No such file or directory` 는 무시). 레이블 일치는 [E](#e-serverinstallsh-실행) 의 게이트웨이 레이블 확인 명령으로 본다
 - [ ] **repo 클론 가능** — `https://github.com/mongshellio/mongshell-menubar` 는 공개 repo 라 인증 없이 클론된다
 - [ ] **외부망 기기 하나** — 와이파이를 끈 휴대폰 등. 공개 URL 확인용
 - [ ] **URL 보관 장소** — 비밀번호 관리자 등 (설치가 출력하는 URL 이 곧 접근권이다)
@@ -93,11 +94,11 @@ App Store/Standalone 판 앱이 아니라 **brew formula** 를 쓴다 — `insta
   ```
   성공: `앱 판 없음`.
 
-- [ ] **설치·데몬 시작·로그인**
+- [ ] **설치·데몬 시작·operator·로그인** — operator 를 로그인과 함께 준다. 일반 사용자로 `tailscale funnel` 을 쓰려면 필요하고, 로그인 전에 주면 이후 `tailscale` 명령을 sudo 없이 쓸 수 있다.
   ```bash
   brew install tailscale
   sudo brew services start tailscale   # tailscaled 를 root 데몬으로 상시 실행
-  tailscale up                          # 출력되는 로그인 URL 을 브라우저로 열어 승인
+  sudo tailscale up --operator=$USER   # 출력되는 로그인 URL 을 브라우저로 열어 승인
   ```
   성공:
   ```bash
@@ -106,11 +107,7 @@ App Store/Standalone 판 앱이 아니라 **brew formula** 를 쓴다 — `insta
   ```
   안 되면: → [5-1](#5-1-installsh--uninstallsh-메시지별) `tailscaled 데몬이 돌고 있지 않습니다` / `Tailscale 상태가 Running 이 아닙니다`
 
-- [ ] **operator 권한** — 일반 사용자로 `tailscale funnel` 을 쓰려면 한 번 준다.
-  ```bash
-  sudo tailscale set --operator=$USER
-  ```
-  성공: 아무 출력 없이 끝난다. 안 하면 E 단계에서 `tailscale funnel 설정 실패` 가 난다.
+  이미 로그인한 기기라면 operator 만 따로 준다: `sudo tailscale set --operator=$USER` (성공하면 출력 없음). operator 가 없으면 E 단계에서 `tailscale funnel 설정 실패` 가 난다.
 
 ### C. Tailscale 관리 콘솔
 
@@ -157,9 +154,13 @@ tailscale status --json | plutil -extract Self.Tags json -o - -     # → ["tag:
 
 ### E. `server/install.sh` 실행
 
-- [ ] repo 루트에서:
+- [ ] **먼저 [6](#6-첫-설치-때-확인할-것-실기-미검증-가정) 가정 1 확인** (첫 설치 때만) — 공개 설정이 비어 있는 지금 한 번 기록해 둔다:
   ```bash
-  server/install.sh
+  tailscale serve status --json; echo "exit $?"
+  ```
+- [ ] repo 루트에서 실행. 첫 설치는 막혔을 때 보고할 수 있게 출력을 저장하며 실행하는 것을 권한다 ([6 보고용 정보 수집](#막혔을-때-보고용-정보-수집)):
+  ```bash
+  server/install.sh 2>&1 | tee ~/openclaw-install.log   # 또는 그냥 server/install.sh
   ```
 
 | 옵션 | 뜻 |
@@ -203,6 +204,13 @@ tailscale status --json | plutil -extract Self.Tags json -o - -     # → ["tag:
 안 되면: `오류:` 로 시작하는 마지막 메시지를 [5-1](#5-1-installsh--uninstallsh-메시지별) 에서 찾는다. `경고:` 는 설치를 멈추지 않는다.
 
 - [ ] **게이트웨이 레이블 확인** — `▶ 게이트웨이 launchd 레이블 탐색` 아래 `→` 줄이 실제 게이트웨이 레이블인지 본다. 스크립트는 `~/Library/LaunchAgents` 의 plist 를 이름순으로 정렬해 **이름에 `claw` 가 들어간 첫 번째**(에이전트 자신 제외)를 고른다. `claw` 가 들어간 plist 가 여러 개면 엉뚱한 것이 잡힐 수 있다. 게이트웨이를 재설치해 레이블이 바뀌면 `install.sh` 를 다시 돌린다.
+  에이전트는 plist **파일 이름**을 레이블로 kickstart 하므로, 파일 이름과 plist 안의 `Label` 이 같고 launchd 에 실제로 로드돼 있어야 자동복구가 된다:
+  ```bash
+  LABEL=ai.openclaw.gateway     # 위 → 줄에 나온 값
+  plutil -extract Label raw -o - ~/Library/LaunchAgents/$LABEL.plist   # → $LABEL 과 같은 문자열
+  launchctl print gui/$(id -u)/$LABEL | head -3                        # → 에러 없이 서비스 정보가 나와야 한다
+  ```
+  다르면 자동복구의 `kickstart` 가 실패한다 (로그에 `복구 시도 — … kickstart 실패`).
 
 - [ ] **상태 URL 보관** — `상태 URL :` 줄을 **비밀번호 관리자**(1Password, macOS 암호 앱 등)에 저장한다. 이 URL 을 아는 사람은 누구나 상태를 읽을 수 있다(토큰 = 접근권). 채팅·이슈·스크린샷에 원문으로 남기지 않는다. 잊어도 [4. URL 다시 보기](#url-다시-보기) 로 다시 만들 수 있다.
 
@@ -214,7 +222,7 @@ tailscale status --json | plutil -extract Self.Tags json -o - -     # → ["tag:
 |---|---|
 | `~/Library/Application Support/mongshell-openclaw-agent/` | 바이너리, `status.json`(0644), `token`(0600) |
 | `~/Library/LaunchAgents/com.mongshell.openclaw-agent.plist` | LaunchAgent (RunAtLoad·KeepAlive) |
-| `~/Library/Logs/mongshell-openclaw-agent.log` | 시작·상태 변화·복구 시도·쓰기 실패 시에만 한 줄씩 기록 |
+| `~/Library/Logs/mongshell-openclaw-agent.log` | 시작·상태 변화·복구 시도·쓰기 실패·자기 레이블 경고 시에만 한 줄씩 기록 ([5-3](#5-3-서버-맥-진단-명령)) |
 | tailscaled 의 serve 설정 | 포트 8443, 경로 `/<토큰>` → `status.json` (funnel, `--bg` 로 영구 저장) |
 
 ### F. 동작 확인
@@ -262,7 +270,7 @@ tailscale status --json | plutil -extract Self.Tags json -o - -     # → ["tag:
 | 🟢 | 정상 | 게이트웨이와 채널이 정상 |
 | 🟡 | 채널 이상 | 게이트웨이는 응답하지만 채널 일부가 멈춤/오류. 서버가 모르는 `health` 값도 여기로 온다 |
 | 🔴 | 게이트웨이 다운 | **서버가** 게이트웨이 다운을 보고함 (openclaw 바이너리가 없을 때 포함) |
-| ⚪ | 서버 연락 두절 / 확인 중… | 서버 소식이 끊김 — 게이트웨이 고장이 **아니다**. 맥북이 오프라인이거나, Funnel·서버 맥·에이전트 쪽 문제. 마지막 성공 응답이 `max(180초, 3×서버 주기)` 보다 오래되면 회색이 된다 |
+| ⚪ | 서버 연락 두절 / 확인 중… | 서버 소식이 끊김 — 게이트웨이 고장이 **아니다**. 맥북이 오프라인이거나, Funnel·서버 맥·에이전트 쪽 문제. 마지막 성공 응답이 일정 시간(서버 주기 기준, [4. 자동복구 끄기 / 주기 변경](#자동복구-끄기--주기-변경)) 넘게 오래되면 회색이 된다 |
 
 서버가 자동 재시작하면 맥북에 `openclaw 자동 재시작됨 (서버)` / `openclaw 자동 재시작 실패 (서버)` 알림이 뜬다 (앱 실행 후 첫 응답은 기준점이라 알리지 않는다).
 
@@ -302,7 +310,7 @@ server/install.sh --no-auto-heal     # 상태 보고만 (맥북 설정의 "자�
 server/install.sh --interval 30      # probe 주기 30초
 server/install.sh                    # 기본값(60초, 자동복구 켬)으로 되돌리기
 ```
-주기를 늘리면 맥북의 연락 두절 판정도 그만큼 느슨해진다 (`max(180초, 3×주기)`).
+주기를 늘리면 맥북의 연락 두절 판정도 그만큼 느슨해진다 — 마지막 성공 응답이 `max(180초, 3×주기)` 보다 오래되면 회색 (판정 사양: [architecture.md § 3](../docs/architecture.md#3-openclaw-상태-선택-경로)).
 
 ### 제거
 
@@ -400,13 +408,15 @@ launchctl print gui/$(id -u)/com.mongshell.openclaw-agent           # 실행 상
 cat ~/Library/Application\ Support/mongshell-openclaw-agent/status.json
 ```
 
-로그 줄 형식 (에이전트가 쓰는 문구):
-- `시작 — status-file=… interval=60s autoHeal=true` — 에이전트 기동
-- `상태: ok (Telegram default)` — 판정이 바뀔 때만
-- `복구 시도 — <레이블> kickstart 성공|실패 (원인: …)` — 자동복구
-- `상태 파일 쓰기 실패 — …` — 디스크·권한 문제
-- `경고: --gateway-label 이 자기 레이블(…)이라 무시하고 자동 탐색합니다`
-- `오류: … 사용법: …` — 인자 오류로 즉시 종료(exit 64). LaunchAgent 가 KeepAlive 로 계속 재기동한다
+로그 줄 형식 (에이전트가 쓰는 문구). 각 줄은 UTC ISO 시각으로 시작한다:
+```
+2026-09-29T03:12:45Z 시작 — status-file=… interval=60s autoHeal=true      ← 에이전트 기동
+2026-09-29T03:12:45Z 경고: --gateway-label 이 자기 레이블(…)이라 무시하고 자동 탐색합니다
+2026-09-29T03:12:47Z 상태: ok (Telegram default)                          ← 판정이 바뀔 때만
+2026-09-29T04:01:10Z 복구 시도 — ai.openclaw.gateway kickstart 성공 (원인: down)   ← 자동복구 (성공|실패)
+2026-09-29T04:05:00Z 상태 파일 쓰기 실패 — …                              ← 디스크·권한 문제
+```
+- 인자 오류는 시각 없이 `오류: …` 와 사용법을 출력하고 즉시 종료한다(exit 64). LaunchAgent 가 KeepAlive 로 계속 재기동한다.
 
 ## 6. 첫 설치 때 확인할 것 (실기 미검증 가정)
 
@@ -415,6 +425,7 @@ cat ~/Library/Application\ Support/mongshell-openclaw-agent/status.json
 | # | 가정 (출처) | 확인 방법 | 틀렸을 때 증상 |
 |---|---|---|---|
 | 1 | serve 설정이 비었을 때 `tailscale serve status --json` 은 빈 출력, JSON, 또는 `No serve config` 로 시작하는 문구다 (`lib.sh`) | **설치 전**에 `tailscale serve status --json; echo "exit $?"` | `'tailscale serve status --json' 출력이 JSON 이 아닙니다` 로 설치 중단 |
+| 1a | brew 판 tailscaled 에 operator 를 준 일반 사용자가 `tailscale up`·`status`·`serve`·`funnel` 을 sudo 없이 쓸 수 있다 (이 문서 [B](#b-tailscale-오픈소스판-brew-formula) 단계, 실기 미확인) | B 이후 `tailscale status` 가 sudo 없이 되는지 | `access denied`·권한 오류. E 에서 `tailscale funnel 설정 실패` |
 | 2 | serve JSON 구조가 `Web["<DNS 이름>:8443"].Handlers`, `TCP["8443"]`, `Foreground` 다 (`lib.sh` 의 해석) | **설치 후** repo 루트에서 아래 명령이 `/<토큰>` 한 줄을 출력하는지 | 빈 출력이면 스크립트가 경로를 못 본다 → 포트 점검이 무의미해지고, `--rotate-token`·uninstall 이 옛 경로를 "없음" 으로 보고 **해제 없이** 진행할 수 있다. 가장 중요한 확인 |
 | 3 | funnel 대상에 파일 경로를 주면 그 파일 하나를 `--set-path` 경로에 서빙한다 (`install.sh` §8) | 외부망에서 상태 URL 이 JSON 을 돌려주는지 ([F](#f-동작-확인)) | 404·빈 응답·디렉터리 목록 |
 | 4 | `--bg` 는 설정을 tailscaled 에 영구 저장한다 (`install.sh` §8) | `sudo brew services restart tailscale` 후 `tailscale funnel status` 와 외부망 URL 재확인 | 데몬 재시작·재부팅 뒤 ⚪ `주소 또는 토큰이 맞지 않습니다` 또는 연결 불가 |
@@ -452,10 +463,11 @@ bash -c 'source server/lib.sh; DNS="$(tailscale status --json | plutil -extract 
 } 2>&1 | sed -E 's/[0-9a-f]{32}/<TOKEN>/g' > ~/openclaw-diag.txt; echo "저장: ~/openclaw-diag.txt"
 ```
 
-`install.sh` 출력 전문도 함께 남긴다. 마지막 `설치 완료.` 블록에 URL(토큰)이 들어가므로 같은 방식으로 가린다:
+`install.sh` 출력 전문도 함께 남긴다. [E](#e-serverinstallsh-실행) 단계를 처음부터 아래 `tee` 형태로 실행했다면 그 로그를 쓰면 된다 — 로그만 얻으려고 다시 실행하면 LaunchAgent 가 한 번 더 교체된다(안전하지만 부작용이 있다). 마지막 `설치 완료.` 블록에 URL(토큰)이 들어가므로 가린 뒤 원본은 지운다:
 ```bash
-server/install.sh 2>&1 | tee ~/openclaw-install.log
+server/install.sh 2>&1 | tee ~/openclaw-install.log      # E 단계에서 이미 했다면 생략
 sed -E 's/[0-9a-f]{32}/<TOKEN>/g' ~/openclaw-install.log > ~/openclaw-install.masked.log
+rm ~/openclaw-install.log
 ```
 공유는 `*.masked.log` 와 `openclaw-diag.txt` 만 한다.
 
