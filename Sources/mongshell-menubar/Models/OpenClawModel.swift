@@ -49,9 +49,12 @@ final class OpenClawModel: ObservableObject {
     /// Validates, saves, and switches to a new status URL (empty = clear). A new
     /// URL may be a different server, so everything learned from the old one —
     /// last success, heal baseline — is dropped, then one read happens at once.
+    /// Re-applying the saved URL (⏎ in an unchanged field) does nothing, so it
+    /// can't wipe what we know or cancel a read in flight.
     func applyStatusURL(_ raw: String) throws(OpenClawURLError) {
-        let url = try OpenClawStatusClient.validatedURL(raw)
-        Preferences.shared.openClawStatusURL = url?.absoluteString ?? ""
+        let normalized = try OpenClawStatusClient.validatedURL(raw)?.absoluteString ?? ""
+        guard normalized != Preferences.shared.openClawStatusURL else { return }
+        Preferences.shared.openClawStatusURL = normalized
         reading = OpenClawReading()
         healWatch = OpenClawHealWatch()
         restartPolling()
