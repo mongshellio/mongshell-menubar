@@ -49,7 +49,7 @@ Swift 는 컴파일이 곧 타입 검사라 별도 typecheck 명령이 없다. *
 - 현재 커버리지는 세 묶음이다.
   - `Tests/ClaudeSettingsTests` — `ClaudeSettingsStore` / `ClaudeSettingsModel`. 불변식: **보이지 않는 설정을 앱이 파괴하지 않는다.**
   - `Tests/OpenClawAgentTests` — 서버 에이전트의 `Probe` / `Heal` / `StatusFile` (`main.swift` 는 진입점이라 제외). 불변식: **판정 규칙·복구 시점·자기 레이블 제외·공개 JSON 형식과 detail 필터가 조용히 바뀌지 않는다.**
-  - `Tests/OpenClawClientTests` — 앱의 `OpenClawStatusClient` / `OpenClawStatus` / `OpenClawHealth`. 에이전트의 `Probe.swift`·`StatusFile.swift` 를 함께 컴파일해 에이전트 인코더 → 앱 파서 왕복을 검증한다. 불변식: **두 타깃의 JSON 키가 어긋나지 않고, 연락 두절(회색)과 게이트웨이 다운(빨강)이 섞이지 않으며, 서버 복구 알림은 새 복구에만 뜬다.**
+  - `Tests/OpenClawClientTests` — 앱의 `OpenClawStatusClient` / `OpenClawStatus` / `OpenClawHealth` / `TimeText`. 에이전트의 `Probe.swift`·`StatusFile.swift` 를 함께 컴파일해 에이전트 인코더 → 앱 파서 왕복을 검증한다. 불변식: **두 타깃의 JSON 키가 어긋나지 않고, 연락 두절(회색)과 게이트웨이 다운(빨강)이 섞이지 않으며, 서버 복구 알림은 새 복구에만 뜨며, 원격 문자열과 응답 크기는 상한 안에서만 받는다.**
 - 서버 스크립트(`server/*.sh`)는 tailscale 실기가 필요해 자동 테스트가 없다. `bash -n` 문법 검사와, 서버 맥에서의 설치 후 [server/README.md](../server/README.md) § 동작 확인이 검증 경로다.
 
 ## 로컬 실행

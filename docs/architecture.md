@@ -83,10 +83,10 @@ UsageModel.pollLoop()  ──(@MainActor, Task)
              → https://<서버 DNS 이름>:8443/<토큰>
 
 [맥북] 메뉴바 앱  OpenClawModel ──(주기 폴링, 기본 60초 · 최소 15초)
-   └─ OpenClawStatusClient → HTTPS GET (ephemeral 세션, 캐시 무시, 타임아웃 10초)
-        └─ 관대한 디코딩 → OpenClawReading (마지막 성공 응답 보관)
+   └─ OpenClawStatusClient → HTTPS GET (ephemeral 세션, 캐시 무시, 타임아웃 10초, 리다이렉트 거부, 본문 64KB 상한)
+        └─ 관대한 디코딩 (detail 은 제어문자→공백, 120자) → OpenClawReading (마지막 성공 응답 보관)
              └─ OpenClawHealth: 🟢 ok / 🟡 degraded / 🔴 down(서버 보고) / ⚪️ unreachable
-   └─ lastHeal.at 변화 → "openclaw 자동 재시작됨 (서버)" / "openclaw 자동 재시작 실패 (서버)" 알림 (첫 응답은 기준점)
+   └─ lastHeal.at 이 지금까지 본 것보다 늦어짐 → "openclaw 자동 재시작됨 (서버)" / "openclaw 자동 재시작 실패 (서버)" 알림 (첫 응답은 기준점)
 ```
 
 - 게이트웨이 레이블은 설치 시 고정한다(`--gateway-label`). 에이전트 자신의 레이블은 탐색·명시 모두에서 제외된다.
@@ -94,7 +94,8 @@ UsageModel.pollLoop()  ──(@MainActor, Task)
 - 설치·제거는 `server/install.sh` / `server/uninstall.sh` (사용법: [server/README.md](../server/README.md)).
 
 - **연락 두절(회색)** 판정은 마지막 **성공** 응답의 `checkedAt` 이 `max(180초, 3×intervalSeconds)` 를 넘었는가 하나다. 일시적 요청 실패는 마지막 성공이 신선한 동안 상태를 바꾸지 않는다. 빨강은 서버가 게이트웨이 다운을 보고했을 때만이다.
-- `checkedAt` 이 없거나 해석 불가한 문서는 실패로 취급한다. 미래 시각(시계 오차)은 수신 시각으로 잘라 나이 0 으로 본다.
+- `checkedAt` 이 없거나 해석 불가한 문서는 실패로 취급한다. 미래 시각(서버 시계가 빠름)은 그 값을 처음 받은 시각으로 고정해 나이를 잰다. 서버 시계가 느리면 그만큼 일찍 두절로 판정된다.
+- 마지막 성공보다 `checkedAt` 이 이른 응답(겹친 요청의 늦은 도착)은 무시한다. 우리가 취소한 요청(URL 재적용 등)은 실패로 기록하지 않는다.
 - HTTP 404 는 연락 두절이되 "주소 또는 토큰이 맞지 않습니다" 로 구분한다. 에러 문구에 URL(=토큰)을 넣지 않는다.
 - 앱은 읽기 전용이다 — 재시작·자동복구·로그는 서버 몫이다.
 
@@ -118,7 +119,7 @@ Claude Code 사용자는 로그인 없이 기존 토큰을 재사용한다. 다�
 
 **인증 경계**: 토큰은 Keychain 에만 저장되고 `api.anthropic.com` / `platform.claude.com` 외 어디에도 전송되지 않는다. 텔레메트리·크래시 리포터가 없다.
 
-**openclaw 상태 URL** (서버 에이전트): 경로의 토큰(32자리 hex)이 유일한 접근 통제인 읽기 전용 capability URL 이다. Claude 자격증명과 무관하며, `server/install.sh --rotate-token` 으로 폐기·재발급한다. 앱은 이것을 Keychain 이 아니라 `Preferences`(UserDefaults)에 두고, https 만 받는다.
+**openclaw 상태 URL** (서버 에이전트): 경로의 토큰(32자리 hex)이 유일한 접근 통제인 읽기 전용 capability URL 이다. Claude 자격증명과 무관하며, `server/install.sh --rotate-token` 으로 폐기·재발급한다. 앱은 이것을 Keychain 이 아니라 `Preferences`(UserDefaults)에 두고, userinfo 없는 https 주소만 받는다.
 
 ## Infrastructure
 
