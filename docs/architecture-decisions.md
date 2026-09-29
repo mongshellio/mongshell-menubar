@@ -17,11 +17,12 @@
 | 2 | 비공식 사용량 엔드포인트 + Claude Code OAuth client 재사용 | active (ToS 회색지대 — 의식적 수용) |
 | 3 | 배포 이원화 — ad-hoc 로컬 빌드 기본, Developer ID 공증은 선택 | active |
 | #3 | 메뉴바를 단일 Claude 마크 + 5h/7d 동시 표시로 | active (표시 형태는 #5 에서 링 게이지로 컴팩트화) |
-| #4 | openclaw 통합을 완전 선택 기능으로 (미설치 시 완전 비가시) | active |
+| #4 | openclaw 통합을 완전 선택 기능으로 (미설치 시 완전 비가시) | superseded by #25 (원문: [decisions-archive.md](decisions-archive.md)) |
 | #5 | openclaw 를 두 번째 status item 이 아닌 단일 아이템에 일원화 | active |
 | #8 | hover 요약을 네이티브 툴팁이 아닌 커스텀 팝오버로 | active |
 | #11 | `~/.claude/settings.json` 편집은 read-modify-write | active |
 | #11-1 | 테스트는 `swift test` 가 아니라 실제 소스 직접 컴파일 | active |
+| #25 | openclaw 감시를 원격 서버 에이전트 + Funnel 정적 상태 파일로 (로컬 모드 제거) | active |
 
 ---
 
@@ -66,16 +67,6 @@
 - **이유**: "지금 여유가 있는가" 는 두 한도를 함께 봐야 답할 수 있는 질문이다. 하나만 보여주고 나머지를 클릭 뒤에 숨기면 글랜스가 성립하지 않는다. 아이콘 6종은 취향 옵션이었지 글랜스 품질에 기여하지 않았다.
 - **결과**: `Preferences` 에서 `iconConcept`·`menuBarMetric` 이 사라져 설정이 단순해졌다. 메뉴바 폭이 늘어난 것이 대가였고, 이는 #5 에서 링 게이지로 컴팩트화하며 회수했다.
 - **파생**: 5시간 창은 리셋 시각을 놓치기 쉬워 **5h 에만 초기화 시각을 함께** 표시한다. 주간 리셋은 기억하기 쉬워 팝오버로 미룬다.
-
-## Decision #4: openclaw 통합을 완전 선택 기능으로
-
-- **도입**: v1.0.0 (#4)
-- **컨텍스트**: 로컬 openclaw 게이트웨이의 건강 상태도 글랜스로 알면 좋지만, 이 앱 사용자 대부분은 openclaw 를 쓰지 않는다.
-- **결정**: openclaw 관련 UI 는 **CLI 가 설치돼 있고 사용자가 `Claude + openclaw` 를 고른 경우에만** 존재한다. 그 외에는 메뉴바·팝오버·설정 어디에도 나타나지 않는다 — 비활성 상태로 회색 표시하지도 않는다.
-- **이유**: [PHILOSOPHY.md](PHILOSOPHY.md) § Design Principles 2 — 전제가 없으면 흔적도 남기지 않는다. "회색으로 비활성" 도 글랜스를 방해하는 시각적 소음이다.
-- **결정 세부**: 상태 판정은 포트/HTTP 체크가 아니라 `openclaw channels status --probe` 파싱이다. 게이트웨이는 살아 있어도 채널 워커만 죽은 상태(🟡)를 포트 체크로는 잡을 수 없기 때문이다.
-- **결과**: 새 외부 의존성 없이 Foundation `Process` 만 쓴다. 셸아웃은 `OpenClawService` 에 격리하고 타임아웃·백그라운드 실행으로 메인 스레드를 막지 않는다. 자동복구(2회 연속 실패 + 쿨다운 600초 → `launchctl` 하드 재시작)를 붙였다.
-- **동반 변경**: 앱 이름을 Quota → mongshell-menubar 로, 번들 ID 를 `com.quota.app` → `com.mongshell.menubar` 로 바꿨다 (Keychain 서비스·URL scheme 동반 변경). Claude Code 의 Keychain 항목 이름과 Claude 브랜드 문자열은 그대로 둔다 — 그건 우리 것이 아니다.
 
 ## Decision #5: openclaw 를 두 번째 status item 이 아닌 단일 아이템에 일원화
 
@@ -131,3 +122,26 @@
   - `@Binding`·`@ObservedObject`·`@StateObject`·`@Environment`·`@AppStorage` 는 27 SDK 에서도 프로퍼티 래퍼라 그대로 쓴다. `@Entry`·`@Animatable` 은 같은 플러그인을 요구하므로 쓰지 않는다.
   - Apple 이 CLT 에 플러그인을 동봉하면 이 결정은 철회 가능하다 — 그때 `@State` 로 되돌리는 것은 순수 리팩토링이다.
 
+## Decision #25: openclaw 감시를 원격 서버 에이전트 + Funnel 정적 상태 파일로
+
+- **도입**: 미정 (#25)
+- **컨텍스트**: openclaw 가 메뉴바 앱을 쓰는 맥북이 아니라 24시간 도는 별도 서버 맥으로 옮겨갔다. 맥북은 여러 대이고 서버와 다른 네트워크에 있으며, 포트포워딩은 하지 않고 클라이언트에 Tailscale 을 설치하지 않는다. #4 의 로컬 셸아웃은 전제 자체가 사라졌다.
+- **결정**: 로컬 모드를 완전히 제거한다. 서버 맥에서 이 repo 의 `mongshell-openclaw-agent`(LaunchAgent)가 `openclaw channels status --probe` 를 판정하고 자동복구를 수행한 뒤, 판정 결과를 JSON 파일로 쓴다. 오픈소스판 Tailscale 의 `tailscale funnel --https=8443 --set-path /<토큰> <파일>` 이 그 파일을 **공개 전용 포트 8443** 에 공개하고, 메뉴바 앱은 그 URL 을 HTTPS 로 읽기만 한다.
+- **이유**:
+  - 판정을 서버에 두는 이유 — 자동복구가 서버에 있으므로 판정도 거기 있어야 하고, 원시 출력을 보내 클라이언트가 다시 파싱하면 파서가 두 벌이 된다.
+  - 파일 서빙을 택한 이유 — 우리 코드에 인터넷에 노출되는 리스너가 없다. 쓰기 동작이 구조적으로 불가능하고, 주소 한 줄(capability URL)로 설정이 끝난다.
+  - 공개 전용 포트 8443 인 이유 — funnel 은 경로가 아니라 포트(host:port) 단위로 공개한다. 443 에 tailnet 전용으로 둔 기존 serve 핸들러가 있으면 우리 경로를 켜는 순간 함께 노출되므로 포트를 분리하고, 설치 스크립트는 8443 에 우리 것 외 핸들러가 있으면 중단한다.
+  - 공개 detail 에 허용 문자 필터를 두는 이유 — 채널 이름은 openclaw 출력에서 잘라 온 외부 문자열이라 봇 계정명·토큰 조각이 섞일 수 있고, URL 은 토큰 하나로만 보호된다. 그래서 영문·한글·숫자·` ._-` 로 된 32자 이하 이름만 그대로 싣고 나머지는 "채널 N개" 로 요약한다. 판정(ok/degraded/down)은 필터 이전에 정해진다.
+  - Swift 에이전트를 택한 이유 — 채널 워커만 죽은 상태를 잡는 판정 규칙(#4 결정 세부 승계 — 포트/HTTP 체크가 아니라 probe 파싱)을 bash 로 다시 짜면 테스트할 수 없고, macOS 에는 `timeout` 이 없다.
+- **결과**:
+  - 표시 규칙 — #4 의 "CLI 가 설치돼 있을 때만" 은 "상태 URL 이 설정돼 있고 `Claude + openclaw` 를 골랐을 때만" 으로 바뀐다. 전제가 없으면 흔적을 남기지 않는다는 원칙은 그대로다.
+  - 상태 — `.unreachable`(회색) 추가, 판정 기준은 마지막 성공 응답의 `checkedAt` 이 `max(180초, 3×interval)` 을 넘었는가 하나. 빨강은 서버가 게이트웨이 다운을 보고했을 때만 — 클라이언트 오프라인 오경보 방지.
+  - 팝오버의 재시작·PID·대시보드·로그 제거. 공개 URL 로 쓰기 동작을 열지 않는다.
+  - 자동복구 설정은 서버 설치 스크립트 플래그(기본 켬)로 옮기고, 앱은 `lastHeal` 변화 알림만 한다.
+  - 상태 URL 은 Preferences(UserDefaults) — 읽기 전용이고 `--rotate-token` 으로 폐기 가능하다. Keychain 규칙은 Claude 자격증명 대상이다.
+  - 에이전트는 자기 자신을 kickstart 하지 않도록 게이트웨이 레이블을 설치 시 고정하고, 탐색에서 자기 레이블을 빼며, 명시 레이블이 자기 레이블이면 무시한다.
+  - 옛 토큰 경로 해제(`--rotate-token`·uninstall)는 fail-closed 다 — 해제 후 serve 설정에 남아 있으면 중단한다.
+  - **단계적 적용**: 서버 에이전트·설치 스크립트가 먼저(#25), 앱 측 교체(원격 URL 읽기·`.unreachable`·로컬 셸아웃과 팝오버 동작 제거)는 후속 PR 이다. 그 사이 앱은 여전히 #4 방식으로 동작한다.
+  - **과도기 (후속 PR 전까지)**: 판정 규칙이 앱 `OpenClawService` 와 에이전트 `Probe` 두 벌이다. 규칙을 바꾸면 양쪽에 반영해야 한다. 공개 detail 필터는 에이전트 쪽에만 있다 (앱은 로컬 표시라 공개 경로가 없다).
+- **트레이드오프**: 서버에 오픈소스판 Tailscale(brew) 필요, 서버에서 CLT 빌드, 재부팅 후 자동 로그인 필요, 토큰이 경로에 있어 헤더보다 위생이 낮음, 외부 의존에 Tailscale Funnel 추가, 비표준 포트(8443)라 443 만 허용하는 네트워크에서는 읽을 수 없음.
+- **폐기 조건**: 서버가 App Store/Standalone 판 Tailscale 을 써야 하게 되면, 에이전트에 헤더 토큰 HTTP 리스너를 붙이고 포트 프록시로 전환한다.
