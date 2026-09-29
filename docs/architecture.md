@@ -91,7 +91,7 @@ UsageModel.pollLoop()  ──(@MainActor, Task)
 
 - 게이트웨이 레이블은 설치 시 고정한다(`--gateway-label`). 에이전트 자신의 레이블은 탐색·명시 모두에서 제외된다.
 - 재시작 후에도 `status.json` 의 `lastHeal` 로 복구 쿨다운을 이어받는다.
-- 설치·제거는 `server/install.sh` / `server/uninstall.sh` (사용법: [server/README.md](../server/README.md)).
+- 설치·제거는 `server/install.sh` / `server/uninstall.sh` (사용법: [server/README.md](../server/README.md)). 설치 옵션(주기·자동복구)은 데이터 폴더의 `options` 파일(`key=value`, 실행하지 않고 파싱)에 저장돼, 재실행 때 명시하지 않은 옵션은 지난 값을 이어받는다.
 
 - **연락 두절(회색)** 판정은 마지막 **성공** 응답의 `checkedAt` 이 `max(180초, 3×intervalSeconds)` 를 넘었는가 하나다. 일시적 요청 실패는 마지막 성공이 신선한 동안 상태를 바꾸지 않는다. 빨강은 서버가 게이트웨이 다운을 보고했을 때만이다.
 - `checkedAt` 이 없거나 해석 불가한 문서는 실패로 취급한다. 미래 시각(서버 시계가 빠름)은 그 값을 처음 받은 시각으로 고정해 나이를 잰다. 서버 시계가 느리면 그만큼 일찍 두절로 판정된다.

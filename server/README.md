@@ -165,8 +165,9 @@ tailscale status --json | plutil -extract Self.Tags json -o - -     # → ["tag:
 
 | 옵션 | 뜻 |
 |---|---|
-| (없음) | 기본: 60초 주기, 자동복구 켬 |
+| (없음) | 첫 설치: 60초 주기, 자동복구 켬. 재실행: 지난번 설치 옵션 그대로 |
 | `--interval N` | probe 주기(초). **15~86400**, 6자리 이하 정수 |
+| `--auto-heal` | 게이트웨이 자동복구 켜기 (`--no-auto-heal` 로 꺼 둔 것을 되돌릴 때) |
 | `--no-auto-heal` | 게이트웨이 자동복구 끄기 (상태 보고만) |
 | `--rotate-token` | URL 토큰 재발급 — 옛 URL 은 즉시 무효 ([4. 토큰 교체](#토큰-교체)) |
 | `-h`, `--help` | 도움말 |
@@ -196,7 +197,7 @@ tailscale status --json | plutil -extract Self.Tags json -o - -     # → ["tag:
 설치 완료.
   상태 URL : https://server-mac.tail1234.ts.net:8443/<32자리 토큰>
   로그     : ~/Library/Logs/mongshell-openclaw-agent.log
-  자동복구 : 켬 (대상 ai.openclaw.gateway)
+  옵션     : 주기 60초, 자동복구 켬 (대상 ai.openclaw.gateway)
 
 위 상태 URL 을 메뉴바 앱 설정의 openclaw 섹션에 붙여넣으세요.
 ```
@@ -214,13 +215,13 @@ tailscale status --json | plutil -extract Self.Tags json -o - -     # → ["tag:
 
 - [ ] **상태 URL 보관** — `상태 URL :` 줄을 **비밀번호 관리자**(1Password, macOS 암호 앱 등)에 저장한다. 이 URL 을 아는 사람은 누구나 상태를 읽을 수 있다(토큰 = 접근권). 채팅·이슈·스크린샷에 원문으로 남기지 않는다. 잊어도 [4. URL 다시 보기](#url-다시-보기) 로 다시 만들 수 있다.
 
-**재실행은 안전하다** — 토큰은 재사용되고(URL 불변) LaunchAgent 만 교체된다. 단 옵션은 저장되지 않는다: `--interval`·`--no-auto-heal` 을 썼다면 재실행 때도 **같은 옵션을 다시 줘야** 한다 (안 주면 60초·자동복구 켬으로 돌아간다).
+**재실행은 안전하다** — 토큰은 재사용되고(URL 불변) LaunchAgent 만 교체된다. 주기·자동복구 옵션은 데이터 폴더의 `options` 파일에 저장돼, 재실행 때 **생략한 옵션은 지난 값을 이어받고** 명시한 옵션만 바뀐다. 적용된 값은 설치 끝의 `옵션 :` 줄에서 확인한다. 저장 파일이 깨져 있으면 `경고: 저장된 … 올바르지 않아 무시합니다` 를 내고 그 항목만 기본값(60초 / 켬)을 쓴다.
 
 설치되는 것:
 
 | 경로 | 내용 |
 |---|---|
-| `~/Library/Application Support/mongshell-openclaw-agent/` | 바이너리, `status.json`(0644), `token`(0600) |
+| `~/Library/Application Support/mongshell-openclaw-agent/` | 바이너리, `status.json`(0644), `token`(0600), `options`(설치 옵션, `key=value`) |
 | `~/Library/LaunchAgents/com.mongshell.openclaw-agent.plist` | LaunchAgent (RunAtLoad·KeepAlive) |
 | `~/Library/Logs/mongshell-openclaw-agent.log` | 시작·상태 변화·복구 시도·쓰기 실패·자기 레이블 경고 시에만 한 줄씩 기록 ([5-3](#5-3-서버-맥-진단-명령)) |
 | tailscaled 의 serve 설정 | 포트 8443, 경로 `/<토큰>` → `status.json` (funnel, `--bg` 로 영구 저장) |
@@ -286,12 +287,12 @@ DNS="$(tailscale status --json | plutil -extract Self.DNSName raw -o - - | sed '
 TOKEN="$(tr -d '[:space:]' < ~/Library/Application\ Support/mongshell-openclaw-agent/token)"
 echo "https://$DNS:8443/$TOKEN"
 ```
-`server/install.sh` 를 (같은 옵션으로) 다시 실행해도 마지막에 같은 URL 을 출력한다.
+`server/install.sh` 를 다시 실행해도 마지막에 같은 URL 을 출력한다 (옵션도 지난 값 그대로).
 
 ### 코드 업데이트
 
 ```bash
-git pull && server/install.sh        # 설치 때 쓴 --interval / --no-auto-heal 이 있으면 다시 붙인다
+git pull && server/install.sh        # 설치 때 쓴 --interval / --no-auto-heal 은 저장값으로 이어진다
 ```
 토큰이 재사용되므로 맥북 설정은 그대로 둔다. 새 에이전트가 이전 `status.json` 의 `lastHeal` 을 읽어 복구 쿨다운(600초)을 이어받는다.
 
@@ -299,7 +300,7 @@ git pull && server/install.sh        # 설치 때 쓴 --interval / --no-auto-hea
 
 URL 이 새어 나갔거나 주기적으로 바꾸고 싶을 때:
 ```bash
-server/install.sh --rotate-token     # 다른 옵션을 쓰던 중이면 함께 붙인다
+server/install.sh --rotate-token     # 주기·자동복구는 저장값 그대로
 ```
 옛 funnel 경로를 먼저 내리고, 실제로 사라진 것을 `tailscale serve status` 로 확인한 뒤에만 새 토큰을 발급한다 (확인 못 하면 새 토큰을 만들지 않고 중단). 옛 URL 은 즉시 404 가 된다 → **모든 맥북에서 새 URL 을 다시 붙여넣어야** 한다 (안 하면 ⚪ `주소 또는 토큰이 맞지 않습니다`).
 
@@ -307,8 +308,8 @@ server/install.sh --rotate-token     # 다른 옵션을 쓰던 중이면 함께 
 
 ```bash
 server/install.sh --no-auto-heal     # 상태 보고만 (맥북 설정의 "자동 복구" 가 "서버에서 꺼짐" 으로 바뀐다)
-server/install.sh --interval 30      # probe 주기 30초
-server/install.sh                    # 기본값(60초, 자동복구 켬)으로 되돌리기
+server/install.sh --interval 30      # probe 주기 30초 (자동복구는 저장값 그대로)
+server/install.sh --interval 60 --auto-heal   # 기본값(60초, 자동복구 켬)으로 되돌리기
 ```
 주기를 늘리면 맥북의 연락 두절 판정도 그만큼 느슨해진다 — 마지막 성공 응답이 `max(180초, 3×주기)` 보다 오래되면 회색 (판정 사양: [architecture.md § 3](../docs/architecture.md#3-openclaw-상태-선택-경로)).
 
@@ -318,7 +319,7 @@ server/install.sh                    # 기본값(60초, 자동복구 켬)으로 
 server/uninstall.sh          # 확인 프롬프트
 server/uninstall.sh --yes    # 묻지 않음
 ```
-funnel 경로 → LaunchAgent → 데이터 폴더(토큰 포함) 순으로 지운다. Tailscale 자체(데몬·로그인·다른 serve/funnel 설정)와 로그 파일은 남긴다. 공개 경로가 실제로 내려갔는지 `tailscale serve status` 로 다시 확인하며, 확인하지 못하면(tailscaled 가 꺼져 있을 때 포함 — `--bg` 로 저장된 공개 설정은 데몬 재기동 시 되살아난다) **아무것도 지우지 않고 중단한다** — 토큰 파일이 남아야 재실행으로 같은 경로를 끌 수 있다. 성공하면 `제거 완료. 로그 파일은 남겨 뒀습니다: …` 가 나온다. 맥북 쪽은 설정의 **지우기** 로 URL 을 비우면 openclaw 요소가 사라진다.
+funnel 경로 → LaunchAgent → 데이터 폴더(토큰·설치 옵션 포함) 순으로 지운다. Tailscale 자체(데몬·로그인·다른 serve/funnel 설정)와 로그 파일은 남긴다. 공개 경로가 실제로 내려갔는지 `tailscale serve status` 로 다시 확인하며, 확인하지 못하면(tailscaled 가 꺼져 있을 때 포함 — `--bg` 로 저장된 공개 설정은 데몬 재기동 시 되살아난다) **아무것도 지우지 않고 중단한다** — 토큰 파일이 남아야 재실행으로 같은 경로를 끌 수 있다. 성공하면 `제거 완료. 로그 파일은 남겨 뒀습니다: …` 가 나온다. 맥북 쪽은 설정의 **지우기** 로 URL 을 비우면 openclaw 요소가 사라진다.
 
 ## 5. 문제 해결
 
@@ -340,6 +341,7 @@ funnel 경로 → LaunchAgent → 데이터 폴더(토큰 포함) 순으로 지�
 | `swift 가 없습니다…` | Command Line Tools 없음 | `xcode-select --install` |
 | `openssl 이 없습니다.` | 기본 `/usr/bin/openssl` 이 PATH 에 없음 | `ls -l /usr/bin/openssl`, PATH 확인 |
 | `--interval 에는 6자리 이하 정수(초)가 필요합니다` / `--interval 은 15~86400 초여야 합니다: …` / `알 수 없는 인자: …` | 옵션 오류 | `server/install.sh --help` |
+| `경고: 저장된 주기가 올바르지 않아 무시합니다 (…): interval=…` / `경고: 저장된 자동복구 값이 올바르지 않아 무시합니다 (…): auto_heal=…` | 데이터 폴더의 `options` 파일 값이 깨짐 | 그 항목만 기본값(60초 / 켬)으로 설치된다. 원하는 값을 `--interval N` / `--no-auto-heal` 로 명시해 재실행하면 파일이 새로 쓰인다 |
 
 **토큰·공개 포트 (install.sh, 공용 lib.sh)**
 
@@ -362,6 +364,7 @@ funnel 경로 → LaunchAgent → 데이터 폴더(토큰 포함) 순으로 지�
 | `빌드 산출물을 찾지 못했습니다: …` | 빌드 경로 불일치 | 위 명령 재현 후 보고 |
 | `경고: 게이트웨이 plist 를 찾지 못해 기본값 ai.openclaw.gateway 을 씁니다.` | `~/Library/LaunchAgents` 에 `claw` plist 없음 | 게이트웨이가 다른 사용자/시스템 도메인에 있으면 자동복구가 실패한다. [1](#1-준비물-체크리스트) 조건 확인 |
 | `생성한 plist 가 올바르지 않습니다: …` | plist 생성 오류 | `plutil -lint ~/Library/LaunchAgents/com.mongshell.openclaw-agent.plist` 결과와 함께 보고 |
+| `경고: 설치 옵션을 저장하지 못했습니다 — 다음 재실행은 옵션을 다시 줘야 합니다: …` | 데이터 폴더 쓰기 실패 | 에이전트는 이번 옵션으로 돈다. `ls -la ~/Library/Application\ Support/mongshell-openclaw-agent/` 로 권한 확인 |
 | `launchctl bootstrap 실패…` | 등록 실패 | 메시지의 `launchctl bootstrap gui/<uid> …` 를 직접 실행해 에러 확인. 해당 사용자가 서버 맥 화면에 로그인해 있지 않으면 `gui/<uid>` 도메인이 없어 실패한다 — 로그인 상태([D](#d-상시-가동))에서 재실행 |
 | `상태 파일이 생기지 않았습니다. 로그 확인: …` | 에이전트가 40초 안에 첫 파일을 못 씀 | `tail -n 50 ~/Library/Logs/mongshell-openclaw-agent.log`, `launchctl print gui/$(id -u)/com.mongshell.openclaw-agent` 의 `last exit code` |
 | `tailscale funnel 설정 실패…` | operator 권한 없음, HTTPS 인증서·funnel nodeAttr 미설정 | `sudo tailscale set --operator=$USER`, [C](#c-tailscale-관리-콘솔) 재확인 후 재실행 |
