@@ -251,7 +251,11 @@ echo "  → $STATUS_FILE"
 # 지원 여부를 보고 붙인다.
 step "tailscale funnel 설정"
 FUNNEL_ARGS=(funnel --bg --https="$FUNNEL_PORT" --set-path="/$TOKEN")
-if "$TAILSCALE" funnel --help 2>&1 | grep -q -- '-yes'; then
+# help 를 먼저 변수로 받는다. 'cmd | grep -q' 는 grep 이 일치 즉시 끝나 cmd 가
+# SIGPIPE 로 죽을 수 있고, pipefail 아래에선 그게 "없음" 으로 읽힌다. help 가
+# 비0 으로 끝나는 버전도 있어 종료 코드는 보지 않는다.
+FUNNEL_HELP="$("$TAILSCALE" funnel --help 2>&1 || true)"
+if grep -qE -- '(^|[[:space:],])--?yes([[:space:],=]|$)' <<<"$FUNNEL_HELP"; then
   FUNNEL_ARGS+=(--yes)
 fi
 FUNNEL_ARGS+=("$STATUS_FILE")
