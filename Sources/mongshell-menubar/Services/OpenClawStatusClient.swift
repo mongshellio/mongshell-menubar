@@ -194,9 +194,12 @@ struct OpenClawStatusClient: Sendable {
 
     /// Longest unknown `health` value echoed back in the UI.
     private static let unknownHealthDisplayLimit = 32
+    /// Longest `detail` kept. The agent's own summary is far shorter; this
+    /// bounds what a broken or hostile document can put in the popover.
+    static let detailDisplayLimit = 120
 
     private static func health(name: Any?, detail: String?) -> OpenClawHealth {
-        let detail = detail ?? ""
+        let detail = displayText(detail ?? "", limit: detailDisplayLimit)
         switch name as? String {
         case "ok":       return .ok(detail: detail)
         case "degraded": return .degraded(detail: detail)
@@ -204,10 +207,19 @@ struct OpenClawStatusClient: Sendable {
         case let other?:
             // Something the agent knows and we don't — not provably healthy,
             // not provably down. Amber, with the raw word so it's diagnosable.
-            return .degraded(detail: "알 수 없는 상태: \(other.prefix(unknownHealthDisplayLimit))")
+            return .degraded(detail: "알 수 없는 상태: \(displayText(other, limit: unknownHealthDisplayLimit))")
         case nil:
             return .degraded(detail: "알 수 없는 상태")
         }
+    }
+
+    /// Remote text made safe to show on one line: control characters (line
+    /// breaks included) become spaces, then it's cut to `limit` characters.
+    private static func displayText(_ raw: String, limit: Int) -> String {
+        let flattened = String(String.UnicodeScalarView(raw.unicodeScalars.map {
+            CharacterSet.controlCharacters.contains($0) ? " " : $0
+        }))
+        return String(flattened.trimmingCharacters(in: .whitespaces).prefix(limit))
     }
 
     private static func healEvent(_ any: Any?) -> OpenClawHealEvent? {

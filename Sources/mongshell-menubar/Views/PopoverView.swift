@@ -55,9 +55,12 @@ struct PopoverView: View {
             }
 
             if let detail = openClaw.health.detailText {
+                // Remote text: already flattened and capped by the client, and
+                // capped again here so it can never push the section around.
                 Text(detail)
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
             // Read-only by design (Decision #25): restarts happen on the server.
