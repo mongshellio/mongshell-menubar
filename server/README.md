@@ -94,7 +94,7 @@ App Store/Standalone 판 앱이 아니라 **brew formula** 를 쓴다 — `insta
   ```
   성공: `앱 판 없음`.
 
-- [ ] **설치·데몬 시작·operator·로그인** — operator 를 로그인과 함께 준다. operator 를 주면 `tailscale status`·`tailscale serve status` 를 sudo 없이 쓸 수 있다. 파일을 서빙하는 funnel 설정은 operator 로도 거부돼 `install.sh` 가 그 명령을 sudo 로 실행한다 ([E](#e-serverinstallsh-실행)). 경로 해제가 sudo 없이 되는지는 아직 확인하지 못했다 ([6](#6-첫-설치-때-확인할-것-실기-미검증-가정) 가정 6).
+- [ ] **설치·데몬 시작·operator·로그인** — operator 를 로그인과 함께 준다. operator 를 주면 `tailscale status`·`tailscale serve status` 를 sudo 없이 쓸 수 있다. 파일을 서빙하는 funnel 설정은 실기에서 operator 로도 거부돼(원인 미확인) `install.sh` 가 그 명령을 sudo 로 실행한다 ([E](#e-serverinstallsh-실행)). 경로 해제가 sudo 없이 되는지는 아직 확인하지 못했다 ([6](#6-첫-설치-때-확인할-것-실기-미검증-가정) 가정 6).
   ```bash
   brew install tailscale
   sudo brew services start tailscale   # tailscaled 를 root 데몬으로 상시 실행
@@ -162,7 +162,7 @@ tailscale status --json | plutil -extract Self.Tags json -o - -     # → ["tag:
   ```bash
   server/install.sh 2>&1 | tee ~/openclaw-install.log   # 또는 그냥 server/install.sh
   ```
-  `▶ tailscale funnel 설정` 단계에서 **맥 로그인 비밀번호**를 물을 수 있다 (sudo — 최근에 인증했으면 묻지 않는다). 파일을 서빙하는 funnel 설정은 operator 를 준 사용자로도 거부되기 때문이다. 비밀번호를 입력할 수 있게 터미널에서 직접 실행한다. `| tee` 로 실행해도 입력은 되지만 프롬프트는 로그 파일에 남지 않는다.
+  `▶ tailscale funnel 설정` 단계에서 **맥 로그인 비밀번호**를 물을 수 있다 (sudo — 최근에 인증했으면 묻지 않는다). 실기에서 파일을 서빙하는 funnel 설정이 operator 를 준 사용자로도 거부됐기 때문이다. 비밀번호를 입력할 수 있게 터미널에서 직접 실행한다. `| tee` 로 실행해도 입력은 되지만 프롬프트는 로그 파일에 남지 않는다.
 
 | 옵션 | 뜻 |
 |---|---|
@@ -371,6 +371,7 @@ funnel 경로 → LaunchAgent → 데이터 폴더(토큰·설치 옵션 포함)
 | `경고: 설치 옵션을 저장하지 못했습니다 — 다음 재실행은 옵션을 다시 줘야 합니다: …` | 데이터 폴더 쓰기 실패 | 에이전트는 이번 옵션으로 돈다. `ls -la ~/Library/Application\ Support/mongshell-openclaw-agent/` 로 권한 확인 |
 | `launchctl bootstrap 실패…` | 등록 실패 | 메시지의 `launchctl bootstrap gui/<uid> …` 를 직접 실행해 에러 확인. 해당 사용자가 서버 맥 화면에 로그인해 있지 않으면 `gui/<uid>` 도메인이 없어 실패한다 — 로그인 상태([D](#d-상시-가동))에서 재실행 |
 | `상태 파일이 생기지 않았습니다. 로그 확인: …` | 에이전트가 40초 안에 첫 파일을 못 씀 | `tail -n 50 ~/Library/Logs/mongshell-openclaw-agent.log`, `launchctl print gui/$(id -u)/com.mongshell.openclaw-agent` 의 `last exit code` |
+| `토큰 형식이 올바르지 않습니다 (32자리 hex 가 아님)…` | 새 토큰 발급(`openssl rand -hex 16`)이 기대한 값을 내지 못함 | 메시지의 토큰 파일을 지우고 재실행. 반복되면 `openssl rand -hex 16` 을 직접 실행해 출력 확인 |
 | `sudo 인증 실패…` | sudo 가 비밀번호를 받지 못함 (터미널 없이 실행·비밀번호 오류), 관리자 계정이 아님 | 터미널에서 직접 재실행. 이 시점에 에이전트는 이미 설치돼 돌고 있으므로 재실행은 안전하다 |
 | `tailscale funnel 설정 실패…` | HTTPS 인증서·funnel nodeAttr 미설정 등 — 바로 위 tailscale 출력이 원인을 말한다 | [C](#c-tailscale-관리-콘솔) 재확인 후 재실행. 에이전트는 이미 설치돼 돌고 있다 |
 | `401 Unauthorized: must be root, or be an operator and able to run 'sudo tailscale' to serve a path or Unix socket` (tailscale 의 출력) | 파일을 서빙하는 serve 설정을 sudo 없이 보냄 — funnel 설정을 sudo 없이 실행하는 옛 `install.sh`, 또는 명령을 손으로 실행 | `install.sh` 가 funnel 설정을 sudo 로 실행하는 판인지 확인하고(`grep -n 'sudo "\$TAILSCALE"' server/install.sh`), 손으로 실행했다면 같은 명령 앞에 `sudo` 를 붙인다 |

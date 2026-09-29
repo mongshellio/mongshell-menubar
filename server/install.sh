@@ -275,6 +275,9 @@ echo "  → $STATUS_FILE"
 # 영구 저장한다. --yes(확인 프롬프트 생략)는 버전에 따라 없을 수 있어 help 로
 # 지원 여부를 보고 붙인다.
 step "tailscale funnel 설정"
+# 새로 발급한 토큰은 여기까지 형식 검사를 거치지 않았다. 비어 있으면 --set-path=/ 가
+# 되어 상태 파일이 루트에 걸리므로, root 로 넘기기 전에 확인한다.
+[[ "$TOKEN" =~ $TOKEN_PATTERN ]] || die "토큰 형식이 올바르지 않습니다 (32자리 hex 가 아님). '$TOKEN_FILE' 을 지우고 다시 실행하세요."
 FUNNEL_ARGS=(funnel --bg --https="$FUNNEL_PORT" --set-path="/$TOKEN")
 # help 를 먼저 변수로 받는다. 'cmd | grep -q' 는 grep 이 일치 즉시 끝나 cmd 가
 # SIGPIPE 로 죽을 수 있고, pipefail 아래에선 그게 "없음" 으로 읽힌다. help 가
@@ -290,9 +293,10 @@ FUNNEL_ARGS+=("$STATUS_FILE")
 # 환경에서는 통하지 않았다 (원인 미확인). 그래서 이 명령은 root 로 실행한다.
 echo "  파일을 서빙하는 funnel 설정은 관리자 권한이 필요해 sudo 로 실행합니다 (비밀번호를 물을 수 있습니다)."
 # 인증 실패와 tailscale 실패를 다른 메시지로 알리려고 인증을 먼저 따로 받는다.
-sudo -v || die "sudo 인증 실패. 비밀번호를 입력할 수 있는 터미널에서 직접 실행했는지, 이 계정이 관리자인지 확인하세요.
+# sudo 는 절대 경로로 부른다 — PATH 앞쪽(/opt/homebrew/bin 등)은 사용자 쓰기 가능이다.
+/usr/bin/sudo -v || die "sudo 인증 실패. 비밀번호를 입력할 수 있는 터미널에서 직접 실행했는지, 이 계정이 관리자인지 확인하세요.
 에이전트는 이미 설치돼 돌고 있으니 다시 실행하면 됩니다."
-if ! sudo "$TAILSCALE" "${FUNNEL_ARGS[@]}"; then
+if ! /usr/bin/sudo "$TAILSCALE" "${FUNNEL_ARGS[@]}"; then
   die "tailscale funnel 설정 실패 (위 tailscale 출력 참조). 관리 콘솔의 HTTPS 인증서·funnel nodeAttr 를 확인하세요 (README).
 에이전트는 이미 설치돼 돌고 있으니 고친 뒤 다시 실행하면 됩니다."
 fi
@@ -319,7 +323,10 @@ case "$ROOT_CODE" in
   404) echo "  → 루트 404 확인 (토큰 경로만 공개)" ;;
   2*|3*)
     # 무엇이 새는지 모르니 우리 경로까지 포함해 이 포트의 인터넷 공개를 통째로 내린다.
-    if "$TAILSCALE" funnel --https="$FUNNEL_PORT" off; then
+    # 공개는 root 로 열었는데 off 가 sudo 없이 되는지는 실기 미확인이라, 실패하면
+    # root 로 한 번 더 시도한다 — 여는 쪽만 되고 닫는 쪽이 막히는 일이 없게.
+    if "$TAILSCALE" funnel --https="$FUNNEL_PORT" off \
+      || /usr/bin/sudo "$TAILSCALE" funnel --https="$FUNNEL_PORT" off; then
       PORT_OFF="포트 $FUNNEL_PORT 의 funnel 공개는 내렸습니다 (우리 경로 포함)."
     else
       PORT_OFF="포트 $FUNNEL_PORT 의 funnel 공개를 내리는 데도 실패했습니다 — 지금도 공개돼 있을 수 있으니 'tailscale funnel --https=$FUNNEL_PORT off' 로 직접 끄세요 (권한 거부면 앞에 sudo)."
