@@ -30,6 +30,10 @@ enum SnapshotRenderer {
         write(PopoverPreview(), to: base, "popover", scale: 2)
         OpenClawModel.shared.presentForSnapshot(.snapshotUnreachable(now: now), now: now)
         write(PopoverPreview(), to: base, "popover_openclaw_unreachable", scale: 2)
+        OpenClawModel.shared.presentForSnapshot(.snapshotDown(now: now), now: now)
+        write(PopoverPreview(), to: base, "popover_openclaw_down", scale: 2)
+        writeWindowed(OpenClawSectionPreview(), size: NSSize(width: 380, height: 420),
+                      to: base, "settings_openclaw_down")
         OpenClawModel.shared.presentForSnapshot(.snapshotOK(now: now), now: now)
 
         // The Claude Code section renders whatever settings file it is pointed
@@ -134,6 +138,15 @@ private extension OpenClawReading {
         return reading
     }
 
+    /// The server reports the gateway down and says why.
+    static func snapshotDown(now: Date) -> OpenClawReading {
+        var reading = OpenClawReading()
+        reading.recordSuccess(OpenClawStatus(
+            checkedAt: now.addingTimeInterval(-40), health: .down(detail: "openclaw 바이너리 없음"),
+            intervalSeconds: 60, autoHeal: true, lastHeal: nil), receivedAt: now)
+        return reading
+    }
+
     /// Last good answer 23 minutes ago, and the latest request failed.
     static func snapshotUnreachable(now: Date) -> OpenClawReading {
         var reading = OpenClawReading()
@@ -153,7 +166,7 @@ private struct MenuBarStrip: View {
     private let items: [(five: Int, weekly: Int, openClaw: OpenClawHealth)] = [
         (12, 34, .ok(detail: "")),
         (62, 45, .unreachable(detail: "")),
-        (95, 91, .down),
+        (95, 91, .down(detail: "")),
     ]
     var body: some View {
         HStack(spacing: 26) {
