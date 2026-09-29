@@ -86,15 +86,15 @@ UsageModel.pollLoop()  ──(@MainActor, Task)
    └─ OpenClawStatusClient → HTTPS GET (ephemeral 세션, 캐시 무시, 타임아웃 10초)
         └─ 관대한 디코딩 → OpenClawReading (마지막 성공 응답 보관)
              └─ OpenClawHealth: 🟢 ok / 🟡 degraded / 🔴 down(서버 보고) / ⚪️ unreachable
-   └─ lastHeal.at 변화 → "openclaw 자동 재시작됨 (서버)" 알림 (첫 응답은 기준점)
+   └─ lastHeal.at 변화 → "openclaw 자동 재시작됨 (서버)" / "openclaw 자동 재시작 실패 (서버)" 알림 (첫 응답은 기준점)
 ```
 
 - 게이트웨이 레이블은 설치 시 고정한다(`--gateway-label`). 에이전트 자신의 레이블은 탐색·명시 모두에서 제외된다.
 - 재시작 후에도 `status.json` 의 `lastHeal` 로 복구 쿨다운을 이어받는다.
 - 설치·제거는 `server/install.sh` / `server/uninstall.sh` (사용법: [server/README.md](../server/README.md)).
 
-- **연락 두절(회색)** 판정은 마지막 **성공** 응답의 `checkedAt` 이 `max(180초, 3×intervalSeconds)` 를 넘었는가 하나다. 일시적 요청 실패는 마지막 성공이 신선한 동안 상태를 바꾸지 않는다. 빨강은 서버가 게이트웨이 다운을 보고했을 때만 — 맥북 오프라인이 오경보가 되지 않게.
-- `checkedAt` 이 없거나 해석 불가한 문서는 신선도를 증명할 수 없어 실패로 취급한다. 미래 시각(시계 오차)은 수신 시각으로 잘라 나이 0 으로 본다.
+- **연락 두절(회색)** 판정은 마지막 **성공** 응답의 `checkedAt` 이 `max(180초, 3×intervalSeconds)` 를 넘었는가 하나다. 일시적 요청 실패는 마지막 성공이 신선한 동안 상태를 바꾸지 않는다. 빨강은 서버가 게이트웨이 다운을 보고했을 때만이다.
+- `checkedAt` 이 없거나 해석 불가한 문서는 실패로 취급한다. 미래 시각(시계 오차)은 수신 시각으로 잘라 나이 0 으로 본다.
 - HTTP 404 는 연락 두절이되 "주소 또는 토큰이 맞지 않습니다" 로 구분한다. 에러 문구에 URL(=토큰)을 넣지 않는다.
 - 앱은 읽기 전용이다 — 재시작·자동복구·로그는 서버 몫이다.
 
@@ -130,7 +130,7 @@ Claude Code 사용자는 로그인 없이 기존 토큰을 재사용한다. 다�
 | 지인 공유 | `scripts/release.sh` | Developer ID + 공증 | `.dmg` 배포 (Gatekeeper 통과, 업데이트 후 토큰 유지) |
 | 서버 에이전트 | `server/install.sh` | 없음 (서버 맥에서 release 빌드) | openclaw 감시 에이전트 LaunchAgent 등록 + Tailscale Funnel 공개 (8443) |
 
-- **App Sandbox 미사용** — Keychain 의 타 앱 항목(Claude Code 자격증명) 접근이 샌드박스와 양립하지 않는다. (openclaw 는 이제 HTTPS 읽기라 샌드박스 사유가 아니다.)
+- **App Sandbox 미사용** — Keychain 의 타 앱 항목(Claude Code 자격증명) 접근이 샌드박스와 양립하지 않는다.
 - 버전 SSOT 는 git tag (`v1.0.0`, `v1.0.1` …) 이며 GitHub Releases 가 배포 채널이다.
 - 외부 SaaS 의존은 Anthropic 호스트다. openclaw 원격 감시를 쓰면 Tailscale(Funnel)이 추가된다.
 

@@ -18,7 +18,7 @@ non_goals:
 | 종류 | 예 | 규칙 |
 |---|---|---|
 | 상태 소유 객체 | `UsageModel`, `OpenClawModel`, `ClaudeSettingsModel`, `Preferences` | `@MainActor final class … : ObservableObject` |
-| 값 타입 | `UsageSnapshot`, `ModelUsage`, `OpenClawHealth` | `struct`/`enum`, `Equatable`, 로직 없음에 가깝게 |
+| 값 타입 | `UsageSnapshot`, `ModelUsage`, `OpenClawHealth` | `struct`/`enum`, `Equatable`, 로직 없음에 가깝게. 단 판정 규칙을 테스트 가능하게 담는 순수 값 타입은 허용 (`OpenClawReading` — 두절 판정, `OpenClawHealWatch` — 복구 알림 판정) |
 
 ## `@MainActor` 격리
 
@@ -30,7 +30,7 @@ non_goals:
 
 ## 싱글턴
 
-`UsageModel.shared` / `Preferences.shared` 는 의도된 싱글턴이다 — AppKit 호스트와 SwiftUI 뷰가 **같은 인스턴스를 관찰해야** 하기 때문. 새 싱글턴을 늘리지 않는다. 그 이유가 없는 상태는 소유자에게 주입한다.
+`UsageModel.shared` / `Preferences.shared` / `OpenClawModel.shared` 는 의도된 싱글턴이다 — AppKit 호스트와 SwiftUI 뷰가 **같은 인스턴스를 관찰해야** 하기 때문. 새 싱글턴을 늘리지 않는다. 그 이유가 없는 상태는 소유자에게 주입한다.
 
 ## 쓰기 가능 상태는 `private(set)`
 
