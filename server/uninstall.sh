@@ -42,7 +42,7 @@ if [[ -z "$TOKEN" ]]; then
 elif ! command -v tailscale >/dev/null; then
   warn "tailscale CLI 가 없어 funnel 경로 /$TOKEN 을 끄지 못했습니다."
 # 가정: install.sh 와 같은 --https/--set-path 에 off 를 주면 그 경로만 해제된다.
-elif ! tailscale funnel --https=443 --set-path="/$TOKEN" off; then
+elif ! tailscale funnel --https=8443 --set-path="/$TOKEN" off; then
   warn "funnel 경로 해제 실패 — 'tailscale funnel status' 로 확인 후 수동으로 끄세요."
 fi
 

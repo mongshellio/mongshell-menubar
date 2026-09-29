@@ -7,6 +7,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib.sh
+source "$ROOT/server/lib.sh"
 PRODUCT="mongshell-openclaw-agent"
 SELF_LABEL="com.mongshell.openclaw-agent"
 DEFAULT_GATEWAY_LABEL="ai.openclaw.gateway"
@@ -84,6 +86,7 @@ BACKEND_STATE="$(plutil -extract BackendState raw -o - - <<<"$TS_JSON" 2>/dev/nu
 DNS_NAME="$(plutil -extract Self.DNSName raw -o - - <<<"$TS_JSON" 2>/dev/null || true)"
 DNS_NAME="${DNS_NAME%.}"
 [[ -n "$DNS_NAME" ]] || die "이 기기의 MagicDNS 이름을 얻지 못했습니다. 관리 콘솔에서 MagicDNS 를 켜세요."
+HOST_PORT="$DNS_NAME:$FUNNEL_PORT"
 
 OPENCLAW=""
 for c in /opt/homebrew/bin/openclaw /usr/local/bin/openclaw; do
@@ -140,13 +143,26 @@ else
   if [[ -n "$OLD_TOKEN" ]]; then
     # 옛 경로를 먼저 내려야 옛 URL 이 계속 살아 있지 않다.
     # 가정: '<같은 --https/--set-path> off' 가 그 경로 하나만 해제한다 (실기 미확인).
-    "$TAILSCALE" funnel --https=443 --set-path="/$OLD_TOKEN" off 2>/dev/null \
+    "$TAILSCALE" funnel --https="$FUNNEL_PORT" --set-path="/$OLD_TOKEN" off 2>/dev/null \
       || warn "옛 funnel 경로 해제 실패 — 'tailscale funnel status' 로 확인 후 수동으로 끄세요."
   fi
   TOKEN="$(openssl rand -hex 16)"
   (umask 077 && printf '%s\n' "$TOKEN" > "$TOKEN_FILE")
   chmod 0600 "$TOKEN_FILE"
   echo "  새 토큰 발급"
+fi
+
+# ── 4b. 공개 포트 점검 ─────────────────────────────────────────────────────
+# funnel 은 포트 전체를 공개하므로, 이 포트에 우리 토큰 경로 말고 다른 핸들러가
+# 있으면 그것까지 인터넷에 열린다. 확인할 수 없으면(설정 조회 실패) 진행하지 않는다.
+step "공개 포트 $FUNNEL_PORT 점검"
+HANDLERS="$(serve_handlers "$TAILSCALE" "$HOST_PORT")" \
+  || die "'tailscale serve status --json' 을 읽지 못해 포트 $FUNNEL_PORT 가 비어 있는지 확인할 수 없습니다."
+FOREIGN="$(grep -vxF -e '' -e "/$TOKEN" <<<"$HANDLERS" || true)"
+if [[ -n "$FOREIGN" ]]; then
+  die "포트 $FUNNEL_PORT 에 이 설치가 만들지 않은 serve 핸들러가 있습니다. funnel 을 켜면 함께 공개되므로 중단합니다:
+$(sed 's/^/  /' <<<"$FOREIGN")
+'tailscale serve status' 로 확인하고 정리한 뒤 다시 실행하세요."
 fi
 
 # ── 5. LaunchAgent ─────────────────────────────────────────────────────────
@@ -221,7 +237,7 @@ echo "  → $STATUS_FILE"
 # 에 영구 저장한다. --yes(확인 프롬프트 생략)는 버전에 따라 없을 수 있어 help 로
 # 지원 여부를 보고 붙인다.
 step "tailscale funnel 설정"
-FUNNEL_ARGS=(funnel --bg --https=443 --set-path="/$TOKEN")
+FUNNEL_ARGS=(funnel --bg --https="$FUNNEL_PORT" --set-path="/$TOKEN")
 if "$TAILSCALE" funnel --help 2>&1 | grep -q -- '-yes'; then
   FUNNEL_ARGS+=(--yes)
 fi
@@ -233,7 +249,7 @@ if ! "$TAILSCALE" "${FUNNEL_ARGS[@]}"; then
 fi
 
 # ── 8. 확인 ────────────────────────────────────────────────────────────────
-URL="https://$DNS_NAME/$TOKEN"
+URL="https://$HOST_PORT/$TOKEN"
 step "공개 URL 확인"
 ok=0
 for _ in $(seq 1 "$CURL_ATTEMPTS"); do
@@ -246,6 +262,20 @@ if [[ $ok -eq 1 ]]; then
 else
   warn "이 맥에서 URL 응답을 확인하지 못했습니다 (전파 지연일 수 있음). 외부망 기기로 열어보세요."
 fi
+
+# 토큰 없는 루트는 404 여야 한다 — 그렇지 않으면 토큰 말고 다른 것이 공개된 것.
+ROOT_URL="https://$HOST_PORT/"
+ROOT_CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$ROOT_URL" 2>/dev/null || true)"
+case "$ROOT_CODE" in
+  404) echo "  → 루트 404 확인 (토큰 경로만 공개)" ;;
+  2*|3*)
+    die "토큰 없는 $ROOT_URL 가 $ROOT_CODE 를 돌려줍니다 — 토큰 경로 말고 다른 것이 공개돼 있습니다.
+'tailscale funnel status' 로 확인하고 포트 $FUNNEL_PORT 의 다른 핸들러를 끄세요." ;;
+  ""|000)
+    warn "이 맥에서 $ROOT_URL 에 닿지 못해 루트 비공개를 확인하지 못했습니다. 외부망 기기로 열어 404 인지 확인하세요." ;;
+  *)
+    warn "$ROOT_URL 가 예상한 404 가 아닌 $ROOT_CODE 를 돌려줍니다. 외부망 기기로 열어 확인하세요." ;;
+esac
 
 cat <<EOF
 
