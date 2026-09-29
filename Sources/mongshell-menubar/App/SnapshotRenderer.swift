@@ -130,7 +130,7 @@ private extension OpenClawReading {
         var reading = OpenClawReading()
         reading.recordSuccess(OpenClawStatus(
             checkedAt: now.addingTimeInterval(-40), health: .ok(detail: "Telegram default"),
-            intervalSeconds: 60, autoHeal: true, lastHeal: nil))
+            intervalSeconds: 60, autoHeal: true, lastHeal: nil), receivedAt: now)
         return reading
     }
 
@@ -139,7 +139,7 @@ private extension OpenClawReading {
         var reading = OpenClawReading()
         reading.recordSuccess(OpenClawStatus(
             checkedAt: now.addingTimeInterval(-23 * 60), health: .ok(detail: "Telegram default"),
-            intervalSeconds: 60, autoHeal: true, lastHeal: nil))
+            intervalSeconds: 60, autoHeal: true, lastHeal: nil), receivedAt: now)
         reading.recordFailure(.offline)
         return reading
     }

@@ -26,7 +26,7 @@ final class OpenClawModel: ObservableObject {
     var checkedClockText: String? {
         let stale: Bool
         if case .unreachable = health { stale = true } else { stale = false }
-        return TimeText.checkedClock(reading.lastSuccess?.checkedAt, stale: stale)
+        return TimeText.checkedClock(reading.lastCheckedAt, stale: stale)
     }
 
     private let client = OpenClawStatusClient()
@@ -107,7 +107,7 @@ final class OpenClawModel: ObservableObject {
 
         switch outcome {
         case .success(let status):
-            reading.recordSuccess(status)
+            reading.recordSuccess(status, receivedAt: Date())
             if let heal = healWatch.observe(status.lastHeal) { notifyHeal(heal) }
         case .failure(let error):
             reading.recordFailure(error)

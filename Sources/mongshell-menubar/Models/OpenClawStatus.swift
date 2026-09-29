@@ -4,9 +4,8 @@ import Foundation
 /// (`mongshell-openclaw-agent`, schema 1). Only what the client uses is kept;
 /// anything the agent adds later is ignored by the parser.
 struct OpenClawStatus: Equatable, Sendable {
-    /// When the agent last probed, already clamped to the time we received it
-    /// (see `OpenClawStatusClient.parse`) so a server clock running ahead can't
-    /// keep a dead agent looking fresh.
+    /// When the agent last probed, on the *server's* clock — see
+    /// `OpenClawReading.lastCheckedAt` for the value freshness is judged on.
     let checkedAt: Date
     /// The server's verdict — only `.ok` / `.degraded` / `.down` come from here.
     let health: OpenClawHealth
@@ -42,10 +41,21 @@ struct OpenClawReading: Equatable, Sendable {
     static let fallbackIntervalSeconds = 60
 
     private(set) var lastSuccess: OpenClawStatus?
+    /// `lastSuccess.checkedAt` on our clock: never later than when we first
+    /// received that `checkedAt`. A server clock running ahead would otherwise
+    /// make a dead agent's last write look fresh until real time caught up
+    /// with it; pinning to the first receipt starts the stale countdown from
+    /// the last time the value actually changed. A server clock running
+    /// *behind* by S is not correctable from here — the countdown then ends
+    /// S early.
+    private(set) var lastCheckedAt: Date?
     /// Why the most recent request failed; cleared by the next success.
     private(set) var lastFailure: String?
 
-    mutating func recordSuccess(_ status: OpenClawStatus) {
+    mutating func recordSuccess(_ status: OpenClawStatus, receivedAt: Date) {
+        if status.checkedAt != lastSuccess?.checkedAt {
+            lastCheckedAt = min(status.checkedAt, receivedAt)
+        }
         lastSuccess = status
         lastFailure = nil
     }
@@ -64,8 +74,8 @@ struct OpenClawReading: Equatable, Sendable {
     }
 
     func health(now: Date) -> OpenClawHealth {
-        if let success = lastSuccess {
-            let age = now.timeIntervalSince(success.checkedAt)
+        if let success = lastSuccess, let checkedAt = lastCheckedAt {
+            let age = now.timeIntervalSince(checkedAt)
             if age <= Self.staleAfter(intervalSeconds: success.intervalSeconds) {
                 return success.health
             }

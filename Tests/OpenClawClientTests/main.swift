@@ -19,8 +19,8 @@ func check(_ label: String, _ ok: Bool, _ detail: String = "") {
     if !ok { failures.append(label) }
 }
 
-func parse(_ json: String, now: Date) -> Result<OpenClawStatus, OpenClawStatusError> {
-    do { return .success(try OpenClawStatusClient.parse(data: Data(json.utf8), now: now)) }
+func parse(_ json: String) -> Result<OpenClawStatus, OpenClawStatusError> {
+    do { return .success(try OpenClawStatusClient.parse(data: Data(json.utf8))) }
     catch { return .failure(error) }
 }
 
@@ -30,7 +30,8 @@ func reading(checkedSecondsAgo age: TimeInterval, interval: Int? = 60, now: Date
              health: OpenClawHealth = .ok(detail: "Telegram default")) -> OpenClawReading {
     var r = OpenClawReading()
     r.recordSuccess(OpenClawStatus(checkedAt: now.addingTimeInterval(-age), health: health,
-                                   intervalSeconds: interval, autoHeal: true, lastHeal: nil))
+                                   intervalSeconds: interval, autoHeal: true, lastHeal: nil),
+                    receivedAt: now)
     return r
 }
 
@@ -46,7 +47,7 @@ do {
                              verdict: .degraded(detail: "Telegram default"),
                              intervalSeconds: 120, autoHeal: false, lastHeal: heal)
     let data = try! StatusFile.encode(status)
-    switch Result(catching: { try OpenClawStatusClient.parse(data: data, now: now) }) {
+    switch Result(catching: { try OpenClawStatusClient.parse(data: data) }) {
     case .success(let s):
         check("checkedAt 왕복", s.checkedAt == now.addingTimeInterval(-5), "\(s.checkedAt)")
         check("health·detail 왕복", s.health == .degraded(detail: "Telegram default"), "\(s.health)")
@@ -62,14 +63,14 @@ do {
     let okData = try! StatusFile.encode(AgentStatus(
         checkedAt: now, verdict: .ok(detail: "Slack main"), intervalSeconds: 60,
         autoHeal: true, lastHeal: nil))
-    let okStatus = try? OpenClawStatusClient.parse(data: okData, now: now)
+    let okStatus = try? OpenClawStatusClient.parse(data: okData)
     check("ok + lastHeal null 왕복",
           okStatus?.health == .ok(detail: "Slack main") && okStatus?.lastHeal == nil)
 
     let downData = try! StatusFile.encode(AgentStatus(
         checkedAt: now, verdict: .down, intervalSeconds: 60, autoHeal: true, lastHeal: nil))
     check("down(detail null) 왕복",
-          (try? OpenClawStatusClient.parse(data: downData, now: now))?.health == .down)
+          (try? OpenClawStatusClient.parse(data: downData))?.health == .down)
 }
 
 // MARK: - 관대한 디코딩
@@ -78,10 +79,10 @@ print("▸ 관대한 디코딩")
 do {
     let base = #""checkedAt":"\#(iso(now))","intervalSeconds":60"#
 
-    if case .failure(let e) = parse(#"{"schema":1,"health":"ok","detail":"x"}"#, now: now) {
+    if case .failure(let e) = parse(#"{"schema":1,"health":"ok","detail":"x"}"#) {
         check("checkedAt 누락 → missingCheckedAt", e == .missingCheckedAt, "\(e)")
     } else { check("checkedAt 누락 → 실패", false) }
-    if case .failure(let e) = parse(#"{"checkedAt":"어제쯤","health":"ok"}"#, now: now) {
+    if case .failure(let e) = parse(#"{"checkedAt":"어제쯤","health":"ok"}"#) {
         check("checkedAt 해석 불가 → missingCheckedAt", e == .missingCheckedAt, "\(e)")
     } else { check("checkedAt 해석 불가 → 실패", false) }
 
@@ -91,24 +92,19 @@ do {
           r.health(now: now) == .unreachable(detail: "상태 파일에 확인 시각이 없습니다"),
           "\(r.health(now: now))")
 
-    let weird = try? parse(#"{\#(base),"health":"rebooting"}"#, now: now).get()
+    let weird = try? parse(#"{\#(base),"health":"rebooting"}"#).get()
     check("모르는 health → degraded",
           weird?.health == .degraded(detail: "알 수 없는 상태: rebooting"),
           "\(String(describing: weird?.health))")
 
-    let future = try? parse(#"{"schema":2,\#(base),"health":"ok","detail":"d","newKey":{"a":1}}"#,
-                            now: now).get()
+    let future = try? parse(#"{"schema":2,\#(base),"health":"ok","detail":"d","newKey":{"a":1}}"#).get()
     check("schema 2 + 모르는 키도 읽힘", future?.health == .ok(detail: "d"),
           "\(String(describing: future))")
 
-    if case .failure(let e) = parse("[1,2]", now: now) {
+    if case .failure(let e) = parse("[1,2]") {
         check("객체가 아닌 JSON → badResponse", e == .badResponse)
     } else { check("객체가 아닌 JSON → 실패", false) }
 
-    let ahead = try? parse(#"{"checkedAt":"\#(iso(now.addingTimeInterval(3600)))","health":"ok"}"#,
-                           now: now).get()
-    check("미래 checkedAt 은 수신 시각으로 잘림", ahead?.checkedAt == now,
-          "\(String(describing: ahead?.checkedAt))")
 }
 
 // MARK: - HTTP
@@ -116,7 +112,7 @@ do {
 print("▸ HTTP 상태 코드")
 do {
     func interpret(_ code: Int) -> OpenClawStatusError? {
-        do { _ = try OpenClawStatusClient.interpret(statusCode: code, data: Data(), now: now); return nil }
+        do { _ = try OpenClawStatusClient.interpret(statusCode: code, data: Data()); return nil }
         catch { return error }
     }
     check("404 → notFound", interpret(404) == .notFound)

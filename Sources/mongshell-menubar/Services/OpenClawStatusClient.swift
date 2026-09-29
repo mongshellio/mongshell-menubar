@@ -113,15 +113,14 @@ struct OpenClawStatusClient: Sendable {
             throw .network
         }
         guard let http = response as? HTTPURLResponse else { throw .badResponse }
-        return try Self.interpret(statusCode: http.statusCode, data: data, now: Date())
+        return try Self.interpret(statusCode: http.statusCode, data: data)
     }
 
     /// Status code → document or error. Split from `fetch` so the 404 mapping
     /// is testable without a server.
-    static func interpret(statusCode: Int, data: Data,
-                          now: Date) throws(OpenClawStatusError) -> OpenClawStatus {
+    static func interpret(statusCode: Int, data: Data) throws(OpenClawStatusError) -> OpenClawStatus {
         switch statusCode {
-        case 200: return try parse(data: data, now: now)
+        case 200: return try parse(data: data)
         case 404: throw .notFound
         default:  throw .http(statusCode)
         }
@@ -139,16 +138,16 @@ struct OpenClawStatusClient: Sendable {
     /// a newer `schema` is still attempted. The only hard requirement is a
     /// parseable `checkedAt` — without it staleness can't be judged, and a
     /// document that can't prove it's fresh must not paint a green dot.
-    ///
-    /// `now` clamps a future `checkedAt` (server clock ahead) to receipt time.
-    static func parse(data: Data, now: Date) throws(OpenClawStatusError) -> OpenClawStatus {
+    /// `checkedAt` is kept as the server wrote it; `OpenClawReading` squares it
+    /// with our clock.
+    static func parse(data: Data) throws(OpenClawStatusError) -> OpenClawStatus {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
             throw .badResponse
         }
         guard let checkedAt = isoDate(root["checkedAt"]) else { throw .missingCheckedAt }
 
         return OpenClawStatus(
-            checkedAt: min(checkedAt, now),
+            checkedAt: checkedAt,
             health: health(name: root["health"], detail: root["detail"] as? String),
             intervalSeconds: positiveInt(root["intervalSeconds"]),
             autoHeal: root["autoHeal"] as? Bool,
