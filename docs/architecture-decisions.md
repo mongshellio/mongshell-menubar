@@ -17,11 +17,12 @@
 | 2 | 비공식 사용량 엔드포인트 + Claude Code OAuth client 재사용 | active (ToS 회색지대 — 의식적 수용) |
 | 3 | 배포 이원화 — ad-hoc 로컬 빌드 기본, Developer ID 공증은 선택 | active |
 | #3 | 메뉴바를 단일 Claude 마크 + 5h/7d 동시 표시로 | active (표시 형태는 #5 에서 링 게이지로 컴팩트화) |
-| #4 | openclaw 통합을 완전 선택 기능으로 (미설치 시 완전 비가시) | superseded by #25 (원문: [decisions-archive.md](decisions-archive.md)) |
+| #4 | openclaw 통합을 완전 선택 기능으로 (미설치 시 완전 비가시) | superseded by #25 |
 | #5 | openclaw 를 두 번째 status item 이 아닌 단일 아이템에 일원화 | active |
 | #8 | hover 요약을 네이티브 툴팁이 아닌 커스텀 팝오버로 | active |
 | #11 | `~/.claude/settings.json` 편집은 read-modify-write | active |
 | #11-1 | 테스트는 `swift test` 가 아니라 실제 소스 직접 컴파일 | active |
+| #11-2 | 뷰 로컬 상태는 `@State` 매크로 대신 `State<Value>` 수동 펼침 | active |
 | #25 | openclaw 감시를 원격 서버 에이전트 + Funnel 정적 상태 파일로 (로컬 모드 제거) | active |
 
 ---
@@ -67,6 +68,16 @@
 - **이유**: "지금 여유가 있는가" 는 두 한도를 함께 봐야 답할 수 있는 질문이다. 하나만 보여주고 나머지를 클릭 뒤에 숨기면 글랜스가 성립하지 않는다. 아이콘 6종은 취향 옵션이었지 글랜스 품질에 기여하지 않았다.
 - **결과**: `Preferences` 에서 `iconConcept`·`menuBarMetric` 이 사라져 설정이 단순해졌다. 메뉴바 폭이 늘어난 것이 대가였고, 이는 #5 에서 링 게이지로 컴팩트화하며 회수했다.
 - **파생**: 5시간 창은 리셋 시각을 놓치기 쉬워 **5h 에만 초기화 시각을 함께** 표시한다. 주간 리셋은 기억하기 쉬워 팝오버로 미룬다.
+
+## Decision #4: openclaw 통합을 완전 선택 기능으로
+
+- **도입**: v1.0.0 (#4)
+- **컨텍스트**: 로컬 openclaw 게이트웨이의 건강 상태도 글랜스로 알면 좋지만, 이 앱 사용자 대부분은 openclaw 를 쓰지 않는다.
+- **결정**: openclaw 관련 UI 는 **CLI 가 설치돼 있고 사용자가 `Claude + openclaw` 를 고른 경우에만** 존재한다. 그 외에는 메뉴바·팝오버·설정 어디에도 나타나지 않는다 — 비활성 상태로 회색 표시하지도 않는다.
+- **이유**: [PHILOSOPHY.md](PHILOSOPHY.md) § Design Principles 2 — 전제가 없으면 흔적도 남기지 않는다. "회색으로 비활성" 도 글랜스를 방해하는 시각적 소음이다.
+- **결정 세부**: 상태 판정은 포트/HTTP 체크가 아니라 `openclaw channels status --probe` 파싱이다. 게이트웨이는 살아 있어도 채널 워커만 죽은 상태(🟡)를 포트 체크로는 잡을 수 없기 때문이다.
+- **결과**: 새 외부 의존성 없이 Foundation `Process` 만 쓴다. 셸아웃은 `OpenClawService` 에 격리하고 타임아웃·백그라운드 실행으로 메인 스레드를 막지 않는다. 자동복구(2회 연속 실패 + 쿨다운 600초 → `launchctl` 하드 재시작)를 붙였다.
+- **동반 변경**: 앱 이름을 Quota → mongshell-menubar 로, 번들 ID 를 `com.quota.app` → `com.mongshell.menubar` 로 바꿨다 (Keychain 서비스·URL scheme 동반 변경). Claude Code 의 Keychain 항목 이름과 Claude 브랜드 문자열은 그대로 둔다 — 그건 우리 것이 아니다.
 
 ## Decision #5: openclaw 를 두 번째 status item 이 아닌 단일 아이템에 일원화
 
