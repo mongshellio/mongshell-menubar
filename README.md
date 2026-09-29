@@ -15,14 +15,17 @@
 맥동합니다. **5h는 링 옆에 초기화 시각(예: `19:00`)을 함께** 보여주고(5시간 창은 리셋 시각을
 놓치기 쉬워서), 7d는 링만 둡니다. 정확한 %와 7d 리셋 시각은 클릭 시 뜨는 팝오버에서 봅니다.
 
-## openclaw 게이트웨이 상태 (선택 기능 — openclaw 설치 시에만 활성화)
-로컬 [openclaw](https://openclaw.ai) 게이트웨이가 설치돼 있으면 설정에서 **`Claude + openclaw`**
-를 선택해 게이트웨이·채널 건강 상태를 **같은 메뉴바 아이템에 통합**해서 볼 수 있습니다 —
-사용률 오른쪽에 발자국 + 신호등(🟢/🟡/🔴)이 붙고, 클릭하면 사용량 팝오버 아래에 openclaw
-섹션(상태/채널/PID + 새로고침·하드 재시작·대시보드/로그)이 함께 표시됩니다.
-`openclaw channels status --probe`를 파싱해 게이트웨이는 살아있어도 채널 워커만 죽은
-상태(🟡)까지 잡아냅니다. **openclaw가 없거나 `Claude만`을 고르면 이 요소는 메뉴바·팝오버
-어디에도 나타나지 않고 기존과 100% 동일하게 동작합니다.**
+## openclaw 게이트웨이 상태 (선택 기능 — 상태 URL 설정 시에만 활성화)
+[openclaw](https://openclaw.ai) 게이트웨이가 도는 **서버 맥**에 감시 에이전트를 설치하면
+([server/README.md](server/README.md)), 에이전트가 판정·자동복구를 하고 결과를 공개 HTTPS
+주소(`https://<서버>.ts.net:8443/<토큰>`)로 내놓습니다. 설정의 **openclaw** 섹션에 그 주소를
+붙여넣고 **`Claude + openclaw`** 를 고르면 게이트웨이·채널 건강 상태가 **같은 메뉴바
+아이템에 통합**됩니다 — 사용률 오른쪽에 발자국 + 신호등(🟢 정상 / 🟡 채널 이상 / 🔴
+게이트웨이 다운 / ⚪️ 서버 연락 두절)이 붙고, 팝오버 아래에 상태·채널·서버 확인 시각이
+표시됩니다. 회색은 서버 소식이 끊겼다는 뜻일 뿐 게이트웨이 고장이 아닙니다(맥북이
+오프라인이어도 빨간 점이 뜨지 않게). 앱은 읽기만 하며, 서버가 자동 재시작하면 알림으로
+알려줍니다. **URL 이 없거나 `Claude만`을 고르면 이 요소는 메뉴바·팝오버 어디에도 나타나지
+않고 기존과 100% 동일하게 동작합니다.**
 
 ## Claude Code 설정 (선택 기능 — `~/.claude` 가 있을 때만 활성화)
 설정창의 **Claude Code** 섹션에서 `~/.claude/settings.json` 을 직접 편집합니다 — 기본 모델,
@@ -133,14 +136,16 @@ Sources/mongshell-menubar/
   Views/PopoverView.swift   라이트 팝오버 308px(5시간/주간/모델별 + openclaw 섹션)
   Views/SettingsView.swift  일반(자동 실행)·색상·폴링·알림·Claude Code·openclaw·계정
   Views/ClaudeSettingsSection.swift  settings.json 편집 섹션(한글 설명 캡션)
+  Views/OpenClawSettingsSection.swift openclaw 상태 URL 입력·상태·확인 간격 섹션
   Design/Palette.swift      색 토큰 SSOT(사용량 3단계·팝오버 표면/텍스트)
   Models/…                  Preferences, UsageState, UsageModel(폴링/알림),
-                            OpenClawHealth, OpenClawModel(Process 폴링/자동복구),
+                            OpenClawHealth, OpenClawStatus(두절 판정·복구 알림 판정),
+                            OpenClawModel(상태 URL 폴링/복구 알림),
                             ClaudeSettingsModel(settings.json ↔ 구조체),
                             LoginItemModel(로그인 항목 상태 캐시/안내)
   Services/…                Config, Credentials(Keychain), UsageAPIClient, AuthService(PKCE),
                             LoopbackServer(OAuth 루프백 리다이렉트 수신),
-                            TimeText, OpenClawService(openclaw 셸아웃/프로브 파서),
+                            TimeText, OpenClawStatusClient(상태 URL HTTPS 읽기/관대한 디코딩),
                             ClaudeSettingsStore(settings.json 입출력/파일 감시),
                             LoginItemService(SMAppService 로그인 항목 등록)
 ```

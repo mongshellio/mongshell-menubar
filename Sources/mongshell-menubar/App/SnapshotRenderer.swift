@@ -11,6 +11,16 @@ enum SnapshotRenderer {
         let base = URL(fileURLWithPath: dir)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
 
+        // openclaw: a fixture URL + canned readings, so the images show the
+        // section without a server and never carry a real token or state.
+        // The argument domain is volatile — nothing is written to disk.
+        UserDefaults.standard.setVolatileDomain([
+            "openClawStatusURL": "https://openclaw-server.example.ts.net:8443/0123456789abcdef0123456789abcdef",
+            "menuBarTarget": MenuBarTarget.claudeAndOpenClaw.rawValue,
+        ], forName: UserDefaults.argumentDomain)
+        let now = Date()
+        OpenClawModel.shared.presentForSnapshot(.snapshotOK(now: now), now: now)
+
         write(MenuBarStrip(scheme: .dark).frame(width: 700, height: 44)
                 .environment(\.colorScheme, .dark),
               to: base, "menubar_strip_dark", scale: 3)
@@ -18,6 +28,9 @@ enum SnapshotRenderer {
                 .environment(\.colorScheme, .light),
               to: base, "menubar_strip_light", scale: 3)
         write(PopoverPreview(), to: base, "popover", scale: 2)
+        OpenClawModel.shared.presentForSnapshot(.snapshotUnreachable(now: now), now: now)
+        write(PopoverPreview(), to: base, "popover_openclaw_unreachable", scale: 2)
+        OpenClawModel.shared.presentForSnapshot(.snapshotOK(now: now), now: now)
 
         // The Claude Code section renders whatever settings file it is pointed
         // at, so default to a fixture: reference images must never carry the
@@ -34,6 +47,8 @@ enum SnapshotRenderer {
                       to: base, "settings")
         writeWindowed(ClaudeSectionPreview(), size: NSSize(width: 380, height: 560),
                       to: base, "settings_claude")
+        writeWindowed(OpenClawSectionPreview(), size: NSSize(width: 380, height: 420),
+                      to: base, "settings_openclaw")
 
         return true
     }
@@ -109,16 +124,45 @@ enum SnapshotRenderer {
 
 // MARK: - Preview views
 
-/// Menu-bar mock: Claude mark + `5h · 7d` text at three usage-level pairs.
+/// Canned openclaw readings for the reference images.
+private extension OpenClawReading {
+    static func snapshotOK(now: Date) -> OpenClawReading {
+        var reading = OpenClawReading()
+        reading.recordSuccess(OpenClawStatus(
+            checkedAt: now.addingTimeInterval(-40), health: .ok(detail: "Telegram default"),
+            intervalSeconds: 60, autoHeal: true, lastHeal: nil), receivedAt: now)
+        return reading
+    }
+
+    /// Last good answer 23 minutes ago, and the latest request failed.
+    static func snapshotUnreachable(now: Date) -> OpenClawReading {
+        var reading = OpenClawReading()
+        reading.recordSuccess(OpenClawStatus(
+            checkedAt: now.addingTimeInterval(-23 * 60), health: .ok(detail: "Telegram default"),
+            intervalSeconds: 60, autoHeal: true, lastHeal: nil), receivedAt: now)
+        reading.recordFailure(.offline)
+        return reading
+    }
+}
+
+/// Menu-bar mock: Claude mark + `5h · 7d` text at three usage-level pairs, each
+/// with a different openclaw dot (ok / server unreachable / gateway down) so the
+/// grey-vs-red distinction is visible side by side.
 private struct MenuBarStrip: View {
     let scheme: ColorScheme
+    private let items: [(five: Int, weekly: Int, openClaw: OpenClawHealth)] = [
+        (12, 34, .ok(detail: "")),
+        (62, 45, .unreachable(detail: "")),
+        (95, 91, .down),
+    ]
     var body: some View {
         HStack(spacing: 26) {
-            ForEach([(12, 34), (62, 45), (95, 91)], id: \.0) { five, weekly in
-                MenuBarContent(fiveHourUsed: five, weeklyUsed: weekly,
+            ForEach(items, id: \.five) { item in
+                MenuBarContent(fiveHourUsed: item.five, weeklyUsed: item.weekly,
                                showRemaining: false, colorCoding: true,
                                showPercent: true,
-                               fiveHourReset: "19:00")
+                               fiveHourReset: "19:00",
+                               openClawDotColor: item.openClaw.dotColor)
             }
         }
         .padding(.horizontal, 18)
@@ -149,6 +193,19 @@ private struct ClaudeSectionPreview: View {
         }
         .formStyle(.grouped)
         .frame(width: 380, height: 560)
+    }
+}
+
+/// The openclaw section alone, for the same reason as the Claude Code one.
+private struct OpenClawSectionPreview: View {
+    var body: some View {
+        Form {
+            Section("openclaw") {
+                OpenClawSettingsSection(prefs: .shared, openClaw: .shared)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 380, height: 420)
     }
 }
 

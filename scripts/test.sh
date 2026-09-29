@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Runs the regression tests: Claude Code settings, then the openclaw server agent.
+# Runs the regression tests: Claude Code settings, the openclaw server agent,
+# then the app's openclaw status client.
 #
 # Not `swift test`: that needs XCTest or swift-testing, and neither ships with
 # the Command Line Tools this project builds against (no Xcode required is a
@@ -35,3 +36,22 @@ swiftc -o "$OUT/agent-tests" \
 
 echo "▶ running openclaw agent tests"
 "$OUT/agent-tests"
+
+# The app client is compiled together with the agent's encoder so the
+# round-trip case catches any key-name drift between the two targets. The
+# @MainActor model (polling, notifications) is left out — its rules live in
+# the pure types listed here, plus the TimeText clock it displays.
+APP="$ROOT/Sources/mongshell-menubar"
+echo "▶ compiling openclaw client tests"
+swiftc -o "$OUT/client-tests" \
+  "$APP/Design/Palette.swift" \
+  "$APP/Models/OpenClawHealth.swift" \
+  "$APP/Models/OpenClawStatus.swift" \
+  "$APP/Services/OpenClawStatusClient.swift" \
+  "$APP/Services/TimeText.swift" \
+  "$AGENT/Probe.swift" \
+  "$AGENT/StatusFile.swift" \
+  "$ROOT/Tests/OpenClawClientTests/main.swift"
+
+echo "▶ running openclaw client tests"
+"$OUT/client-tests"

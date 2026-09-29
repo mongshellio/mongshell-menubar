@@ -17,7 +17,7 @@ non_goals:
 
 - 상태는 `Models/` 의 `@MainActor ObservableObject` (`UsageModel.shared`, `Preferences.shared`, `OpenClawModel`) 를 `@ObservedObject`/`@EnvironmentObject` 로 관찰한다.
 - 뷰 안에서 `URLSession`·`Process`·`FileManager`·Keychain 을 직접 부르지 않는다. 필요하면 모델에 메서드를 만들고 그것을 호출한다.
-- 사용자 액션은 모델 메서드 호출로 끝난다 (`refreshNow()`, `restart()` 등).
+- 사용자 액션은 모델 메서드 호출로 끝난다 (`refreshNow()`, `applyStatusURL(_:)` 등).
 
 ## 뷰 로컬 상태는 `@State` 대신 수동 펼침
 
@@ -41,7 +41,7 @@ private var pulsing: Bool {
 |---|---|---|
 | 메뉴바 | `MenuBarIconView`, `ClaudeMarkView` | 폭이 유한하다. 상시 표시 항목 추가는 무엇을 뺄지 함께 제시해야 한다 |
 | hover 요약 | `HoverSummaryView` | 즉시 표시가 존재 이유다 — 지연을 만드는 애니메이션·비동기 로드 금지 |
-| 클릭 팝오버 / 설정창 | `PopoverView`, `SettingsView`, `ClaudeSettingsSection` | 정확한 숫자와 상세는 여기로 미룬다 |
+| 클릭 팝오버 / 설정창 | `PopoverView`, `SettingsView`, `ClaudeSettingsSection`, `OpenClawSettingsSection` | 정확한 숫자와 상세는 여기로 미룬다 |
 
 메뉴바에 무언가를 더하려는 변경은 [docs/PHILOSOPHY.md](../../../docs/PHILOSOPHY.md) § Design Principles 1 을 먼저 통과해야 한다.
 
@@ -68,4 +68,4 @@ UI 를 추가·변경하면 `App/SnapshotRenderer.swift` 의 렌더 목록에 �
 
 ## 선택 기능의 비가시성
 
-openclaw·Claude Code 설정처럼 전제가 없을 수 있는 요소는 **비활성 회색 표시가 아니라 아예 렌더하지 않는다** (Decision #4). `if` 로 분기하되 자리(spacer·구분선)를 남기지 않는다.
+openclaw·Claude Code 설정처럼 전제가 없을 수 있는 요소는 **비활성 회색 표시(기능 꺼짐의 의미)가 아니라 아예 렌더하지 않는다** (PHILOSOPHY 원칙 2 / Decision #25). `if` 로 분기하되 자리(spacer·구분선)를 남기지 않는다. 설정 진입점 예외는 PHILOSOPHY 원칙 2 를 따른다 — 현재 해당하는 것은 `OpenClawSettingsSection` 의 상태 URL 입력칸뿐이다.

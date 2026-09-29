@@ -8,12 +8,6 @@ struct PopoverView: View {
     var onOpenSettings: () -> Void
     var onQuit: () -> Void
 
-    /// openclaw info is unified into this popover only when opted in AND
-    /// installed — otherwise the popover is identical to the plain build.
-    private var showOpenClaw: Bool {
-        prefs.menuBarTarget == .claudeAndOpenClaw && OpenClawService.isInstalled
-    }
-
     private var snap: UsageSnapshot { model.snapshot }
     private var fiveMeter: Meter { Meter(usedPercent: snap.fiveHourPercent, showRemaining: prefs.showRemaining) }
     /// Explicit label (both modes) so it's never ambiguous whether the
@@ -28,7 +22,7 @@ struct PopoverView: View {
             primaryGauge
             hairline
             weeklySection
-            if showOpenClaw {
+            if prefs.showsOpenClaw {
                 hairline
                 openClawSection
             }
@@ -61,31 +55,25 @@ struct PopoverView: View {
             }
 
             if let detail = openClaw.health.detailText {
+                // Remote text: already flattened and capped by the client, and
+                // capped again here so it can never push the section around.
                 Text(detail)
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.textPrimary)
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let pid = openClaw.pid {
-                Text("PID \(pid)")
+            // Read-only by design (Decision #25): restarts happen on the server.
+            HStack(spacing: 8) {
+                Text(openClaw.checkedClockText.map { "서버 확인 \($0)" } ?? "서버 확인 기록 없음")
                     .font(.system(size: 11))
                     .monospacedDigit()
                     .foregroundStyle(Palette.textTertiary)
+                Spacer(minLength: 8)
+                Button("새로고침") { openClaw.refreshNow() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
             }
-
-            VStack(spacing: 8) {
-                HStack(spacing: 8) {
-                    Button("새로고침") { openClaw.refreshNow() }
-                    Button("지금 재시작") { openClaw.hardRestart() }
-                }
-                HStack(spacing: 8) {
-                    Button("대시보드 열기") { openClaw.openDashboard() }
-                    Button("로그 열기") { openClaw.openLog() }
-                }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 18)
         .padding(.top, 15)

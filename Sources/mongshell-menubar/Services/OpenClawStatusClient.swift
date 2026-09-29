@@ -1,0 +1,290 @@
+import Foundation
+
+/// Why reading the status document failed. `detail` is what the UI shows — it
+/// never contains the URL, because the URL's path *is* the access token.
+enum OpenClawStatusError: Error, Equatable, Sendable {
+    /// HTTP 404 — funnel is up but nothing is served at this path: wrong token,
+    /// rotated token, or wrong host.
+    case notFound
+    case http(Int)
+    case timedOut
+    case offline
+    /// Any other transport failure (DNS, TLS, refused, …).
+    case network
+    /// Not a JSON object.
+    case badResponse
+    /// No usable `checkedAt` — the document can't vouch for its own freshness.
+    case missingCheckedAt
+    /// The request was cancelled on our side (the poll loop was replaced). Not
+    /// a fact about the server, so `OpenClawReading` never records it.
+    case cancelled
+
+    var detail: String {
+        switch self {
+        case .notFound:         return "주소 또는 토큰이 맞지 않습니다"
+        case .http(let code):   return "서버 응답 오류 (HTTP \(code))"
+        case .timedOut:         return "응답 시간 초과"
+        case .offline:          return "네트워크 연결 없음"
+        case .network:          return "서버에 연결할 수 없습니다"
+        case .badResponse:      return "상태 파일을 읽을 수 없습니다"
+        case .missingCheckedAt: return "상태 파일에 확인 시각이 없습니다"
+        case .cancelled:        return "요청 취소됨"
+        }
+    }
+
+    /// Transport failure → error. Fixed strings only: URLError's own
+    /// description embeds the URL.
+    static func transport(_ code: URLError.Code) -> OpenClawStatusError {
+        switch code {
+        case .cancelled: return .cancelled
+        case .timedOut:  return .timedOut
+        case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
+            return .offline
+        default:         return .network
+        }
+    }
+}
+
+/// Why a typed-in status URL was rejected.
+enum OpenClawURLError: LocalizedError, Equatable {
+    case notHTTPS
+    case malformed
+
+    var errorDescription: String? {
+        switch self {
+        case .notHTTPS:  return "https:// 주소만 사용할 수 있습니다"
+        case .malformed: return "주소 형식이 올바르지 않습니다"
+        }
+    }
+}
+
+/// Reads the openclaw status document that the server agent writes and
+/// `tailscale funnel` serves (Decision #25). Read-only by construction: one GET,
+/// no credentials, nothing written back.
+struct OpenClawStatusClient: Sendable {
+    /// A static file on the tailnet edge answers fast; anything slower is a
+    /// network problem, and the next poll will try again.
+    static let requestTimeout: TimeInterval = 10
+
+    /// Largest status document read. The agent's is a few hundred bytes; the
+    /// cap keeps whatever answers at that address from filling memory.
+    static let maxResponseBytes: Int64 = 64 * 1024
+
+    /// Ephemeral + no cache: every poll must see the file as it is now — a
+    /// cached copy would look fresh while the agent is dead. Nothing (cookies,
+    /// the token-bearing URL in a cache DB) is persisted to disk either.
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.urlCache = nil
+        config.timeoutIntervalForRequest = requestTimeout
+        config.timeoutIntervalForResource = requestTimeout
+        return URLSession(configuration: config, delegate: RedirectRefuser(), delegateQueue: nil)
+    }()
+
+    // MARK: URL
+
+    /// Normalizes user input. Empty (after trimming) → nil, meaning "not
+    /// configured". Only `https` is accepted: the path carries the token, and
+    /// the agent is only ever published over HTTPS. Userinfo is refused: the
+    /// agent never needs it, and `https://a.ts.net@evil.com/…` reads like a
+    /// tailnet host while actually pointing at `evil.com`.
+    static func validatedURL(_ raw: String) throws(OpenClawURLError) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        guard let url = URL(string: trimmed), let scheme = url.scheme else {
+            throw .malformed
+        }
+        guard scheme.lowercased() == "https" else { throw .notHTTPS }
+        guard let host = url.host, !host.isEmpty else { throw .malformed }
+        guard url.user == nil, url.password == nil else { throw .malformed }
+        return url
+    }
+
+    // MARK: Fetch
+
+    func fetch(_ url: URL) async throws(OpenClawStatusError) -> OpenClawStatus {
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await Self.download(req)
+        } catch let error as OpenClawStatusError {
+            throw error
+        } catch let error as URLError {
+            throw .transport(error.code)
+        } catch is CancellationError {
+            throw .cancelled
+        } catch {
+            throw .network
+        }
+        guard let http = response as? HTTPURLResponse else { throw .badResponse }
+        return try Self.interpret(statusCode: http.statusCode, data: data)
+    }
+
+    /// Reads the body, giving up with `.badResponse` as soon as it's known to
+    /// pass `maxResponseBytes` — from the declared length when there is one,
+    /// otherwise while streaming. A non-200 answer is returned without its
+    /// body: `interpret` doesn't need it, and a large error page must still
+    /// surface as its status code (404 → the token hint), not as `.badResponse`.
+    private static func download(_ req: URLRequest) async throws -> (Data, URLResponse) {
+        let (bytes, response) = try await session.bytes(for: req)
+        if let http = response as? HTTPURLResponse, !readsBody(statusCode: http.statusCode) {
+            bytes.task.cancel()
+            return (Data(), response)
+        }
+        guard !exceedsSizeLimit(response.expectedContentLength) else {
+            bytes.task.cancel()
+            throw OpenClawStatusError.badResponse
+        }
+        var data = Data()
+        for try await byte in bytes {
+            data.append(byte)
+            if exceedsSizeLimit(Int64(data.count)) {
+                bytes.task.cancel()
+                throw OpenClawStatusError.badResponse
+            }
+        }
+        return (data, response)
+    }
+
+    /// Only a 200 carries a status document; every other code is judged on
+    /// the code alone.
+    static func readsBody(statusCode: Int) -> Bool {
+        statusCode == okStatusCode
+    }
+
+    private static let okStatusCode = 200
+
+    /// Whether a byte count is over the cap. An unknown length (-1) isn't.
+    static func exceedsSizeLimit(_ byteCount: Int64) -> Bool {
+        byteCount > maxResponseBytes
+    }
+
+    /// Status code → document or error. Split from `fetch` so the 404 mapping
+    /// is testable without a server.
+    static func interpret(statusCode: Int, data: Data) throws(OpenClawStatusError) -> OpenClawStatus {
+        switch statusCode {
+        case okStatusCode: return try parse(data: data)
+        case 404: throw .notFound
+        default:  throw .http(statusCode)
+        }
+    }
+
+    // MARK: Tolerant decoding
+
+    /// The agent's document (`StatusFile.swift`, schema 1):
+    /// ```
+    /// {"schema":1,"checkedAt":"2026-09-29T03:12:45Z","health":"ok",
+    ///  "detail":"Telegram default","intervalSeconds":60,"autoHeal":true,
+    ///  "lastHeal":{"at":"…","ok":true,"reason":"down"}}
+    /// ```
+    /// Lenient like the usage parser (Decision 2): unknown keys are ignored and
+    /// a newer `schema` is still attempted. The only hard requirement is a
+    /// parseable `checkedAt` — without it staleness can't be judged, and a
+    /// document that can't prove it's fresh must not paint a green dot.
+    /// `checkedAt` is kept as the server wrote it; `OpenClawReading` squares it
+    /// with our clock.
+    static func parse(data: Data) throws(OpenClawStatusError) -> OpenClawStatus {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            throw .badResponse
+        }
+        guard let checkedAt = isoDate(root["checkedAt"]) else { throw .missingCheckedAt }
+
+        return OpenClawStatus(
+            checkedAt: checkedAt,
+            health: health(name: root["health"], detail: root["detail"] as? String),
+            intervalSeconds: positiveInt(root["intervalSeconds"]),
+            autoHeal: root["autoHeal"] as? Bool,
+            lastHeal: healEvent(root["lastHeal"])
+        )
+    }
+
+    /// Longest unknown `health` value echoed back in the UI.
+    private static let unknownHealthDisplayLimit = 32
+    /// Longest `detail` kept. The agent's own summary is far shorter; this
+    /// bounds what a broken or hostile document can put in the popover.
+    static let detailDisplayLimit = 120
+
+    private static func health(name: Any?, detail: String?) -> OpenClawHealth {
+        let detail = displayText(detail ?? "", limit: detailDisplayLimit)
+        switch name as? String {
+        case "ok":       return .ok(detail: detail)
+        case "degraded": return .degraded(detail: detail)
+        case "down":     return .down
+        case let other?:
+            // Something the agent knows and we don't — not provably healthy,
+            // not provably down. Amber, with the raw word so it's diagnosable.
+            return .degraded(detail: "알 수 없는 상태: \(displayText(other, limit: unknownHealthDisplayLimit))")
+        case nil:
+            return .degraded(detail: "알 수 없는 상태")
+        }
+    }
+
+    /// Scalars kept per displayed text, on top of the character limit: one
+    /// character can stack any number of combining marks ("Zalgo" text), so a
+    /// character count alone doesn't bound what gets drawn.
+    static let displayScalarLimit = 480
+    /// Replaced by a space: control characters plus every line break —
+    /// U+2028/U+2029 aren't control characters but still break the line.
+    private static let lineBreaking = CharacterSet.controlCharacters.union(.newlines)
+
+    /// Remote text made safe to show on one line: control characters and line
+    /// breaks become spaces, then it's cut to `limit` characters and at most
+    /// `displayScalarLimit` scalars.
+    private static func displayText(_ raw: String, limit: Int) -> String {
+        let flattened = String(String.UnicodeScalarView(raw.unicodeScalars.map {
+            lineBreaking.contains($0) ? " " : $0
+        }))
+        var kept = ""
+        var scalarCount = 0
+        for character in flattened.trimmingCharacters(in: .whitespaces).prefix(limit) {
+            scalarCount += character.unicodeScalars.count
+            if scalarCount > displayScalarLimit { break }
+            kept.append(character)
+        }
+        return kept
+    }
+
+    private static func healEvent(_ any: Any?) -> OpenClawHealEvent? {
+        guard let dict = any as? [String: Any], let at = isoDate(dict["at"]) else { return nil }
+        // A missing `ok` reads as success: announcing a failure we can't
+        // confirm would be a false alarm.
+        return OpenClawHealEvent(at: at,
+                                 ok: (dict["ok"] as? Bool) ?? true,
+                                 reason: dict["reason"] as? String)
+    }
+
+    private static func positiveInt(_ any: Any?) -> Int? {
+        // JSONSerialization hands `true` back as an NSNumber worth 1 — a bool
+        // is not an interval.
+        guard let number = any as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let value = number.doubleValue
+        // Bounded so `3 × interval` can't overflow downstream.
+        guard value.isFinite, value > 0, value < Double(Int32.max) else { return nil }
+        return Int(value)
+    }
+
+    private static func isoDate(_ any: Any?) -> Date? {
+        guard let s = any as? String else { return nil }
+        let withFrac = ISO8601DateFormatter()
+        withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return withFrac.date(from: s) ?? ISO8601DateFormatter().date(from: s)
+    }
+}
+
+/// Refuses every redirect. The agent serves one file at one address, so a 3xx
+/// is either a misconfiguration or something steering the token-bearing
+/// request elsewhere. Returning nil hands the 3xx back as the response, which
+/// `interpret` reports as `.http(code)`.
+private final class RedirectRefuser: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? {
+        nil
+    }
+}

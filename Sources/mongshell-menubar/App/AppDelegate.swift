@@ -109,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         resizeStatusItem()
         model.start()
 
-        // No-op internally if openclaw isn't installed.
+        // Parks in .notConfigured (no polling) when no status URL is set.
         openClaw.start()
 
         // Loads ~/.claude/settings.json and watches it, so the settings window
@@ -142,7 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             hideHoverSummary() // don't stack the hover summary under the full popover
             // Freshen openclaw before showing its section in the unified popover.
-            if prefs.menuBarTarget == .claudeAndOpenClaw, OpenClawService.isInstalled {
+            if prefs.showsOpenClaw {
                 openClaw.refreshNow()
             }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
