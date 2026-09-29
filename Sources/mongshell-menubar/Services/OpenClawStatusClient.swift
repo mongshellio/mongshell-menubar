@@ -101,10 +101,17 @@ struct OpenClawStatusClient: Sendable {
             throw .network
         }
         guard let http = response as? HTTPURLResponse else { throw .badResponse }
-        switch http.statusCode {
-        case 200: return try Self.parse(data: data, now: Date())
+        return try Self.interpret(statusCode: http.statusCode, data: data, now: Date())
+    }
+
+    /// Status code → document or error. Split from `fetch` so the 404 mapping
+    /// is testable without a server.
+    static func interpret(statusCode: Int, data: Data,
+                          now: Date) throws(OpenClawStatusError) -> OpenClawStatus {
+        switch statusCode {
+        case 200: return try parse(data: data, now: now)
         case 404: throw .notFound
-        default:  throw .http(http.statusCode)
+        default:  throw .http(statusCode)
         }
     }
 
