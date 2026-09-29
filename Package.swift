@@ -16,6 +16,13 @@ let package = Package(
                 "Services/CLAUDE.md",
                 "Views/CLAUDE.md"
             ]
+        ),
+        // Headless watchdog for the always-on server mac: probes openclaw,
+        // auto-heals it, and writes a JSON status file that `tailscale funnel`
+        // serves to the menubar clients. Installed by server/install.sh.
+        .executableTarget(
+            name: "mongshell-openclaw-agent",
+            path: "Sources/mongshell-openclaw-agent"
         )
         // NOTE: no SwiftPM test target on purpose — `swift test` needs XCTest or
         // swift-testing, and neither ships with the Command Line Tools this

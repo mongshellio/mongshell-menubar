@@ -1,0 +1,114 @@
+# 서버 에이전트 (mongshell-openclaw-agent)
+
+openclaw 게이트웨이가 24시간 도는 **서버 맥**에 설치하는 감시 에이전트. 주기적으로 게이트웨이를 probe 하고, 필요하면 launchd 로 재시작(자동복구)한 뒤, 판정 결과를 JSON 파일로 남긴다. 그 파일은 `tailscale funnel` 이 공개 HTTPS 주소 `https://<서버 DNS 이름>:8443/<토큰>` 으로 서빙하고, 다른 네트워크에 있는 맥북들의 메뉴바 앱이 그 주소를 읽는다.
+
+- 에이전트는 네트워크 리스너를 갖지 않는다 — 서빙은 tailscaled 가 한다.
+- Tailscale 은 **서버 맥에만** 설치한다. 메뉴바 앱 쪽 맥북에는 필요 없다.
+- URL 의 토큰이 유일한 접근 통제다. 응답에는 상태 판정만 담기고 PID·원시 출력은 없다.
+- 공개는 **8443 포트 전용**이다. funnel 은 포트 단위로 공개되므로, 443 에 tailnet 전용으로 둔 다른 `tailscale serve` 핸들러가 함께 노출되지 않도록 분리했다. 설치 스크립트는 8443 에 이 설치가 만들지 않은 핸들러가 있으면 중단한다.
+
+## 1회 수동 설정
+
+### 1. 오픈소스판 Tailscale 설치
+
+App Store/Standalone 판 앱이 아니라 **brew formula** 를 쓴다 (`install.sh` 가 `tailscaled` 데몬을 전제로 한다).
+
+```bash
+brew install tailscale
+sudo brew services start tailscale   # tailscaled 를 root 데몬으로 상시 실행
+tailscale up                          # 브라우저로 로그인
+```
+
+App Store 판 Tailscale 앱이 설치돼 있다면 먼저 종료·제거한다.
+
+일반 사용자로 `tailscale funnel` 을 쓰려면 한 번 operator 권한을 준다.
+
+```bash
+sudo tailscale set --operator=$USER
+```
+
+### 2. 관리 콘솔 설정 (https://login.tailscale.com/admin)
+
+1. **DNS** 탭 → MagicDNS 켜기
+2. **DNS** 탭 → HTTPS Certificates 켜기
+3. **Access controls** (정책 파일) 에 funnel 권한 추가 — 서버 기기에만 준다:
+
+```jsonc
+"tagOwners": {
+  "tag:openclaw-server": ["autogroup:admin"]
+},
+"nodeAttrs": [
+  {
+    "target": ["tag:openclaw-server"],
+    "attr":   ["funnel"]
+  }
+  // 대안(범위가 넓음): 태그 없이 모든 멤버 기기에 허용하려면
+  // "target": ["autogroup:member"]
+]
+```
+
+4. **Machines** 탭 → 서버 맥의 `⋯` → **Edit ACL tags** 에서 `tag:openclaw-server` 를 붙인다.
+
+### 3. 서버 맥 상시 가동
+
+에이전트는 사용자 LaunchAgent 라 **해당 사용자가 로그인해 있어야** 돈다.
+
+- 시스템 설정 → 잠금 화면/에너지: 잠자기 방지 (디스플레이는 꺼져도 됨)
+- 시스템 설정 → 사용자 및 그룹: 재부팅 후 **자동 로그인** 켜기
+- 정전 복구 후 자동 시작: `sudo pmset -a autorestart 1`
+
+## 설치
+
+repo 를 서버 맥에 클론한 뒤:
+
+```bash
+server/install.sh                     # 기본: 60초 주기, 자동복구 켬
+server/install.sh --interval 30       # 주기 변경 (15~86400초)
+server/install.sh --no-auto-heal      # 자동복구 끄기 (상태 보고만)
+server/install.sh --rotate-token      # URL 토큰 재발급 — 옛 URL 은 즉시 무효
+```
+
+마지막에 출력되는 `https://…:8443/<토큰>` URL 을 메뉴바 앱 설정에 붙여넣는다 (앱 측 원격 URL 지원은 후속 버전에서 추가). 재실행은 안전하다 — 토큰은 재사용되고 LaunchAgent 만 교체된다 (코드 업데이트 후 `git pull && server/install.sh`).
+
+설치되는 것:
+
+| 경로 | 내용 |
+|---|---|
+| `~/Library/Application Support/mongshell-openclaw-agent/` | 바이너리, `status.json`, `token`(0600) |
+| `~/Library/LaunchAgents/com.mongshell.openclaw-agent.plist` | LaunchAgent (RunAtLoad·KeepAlive) |
+| `~/Library/Logs/mongshell-openclaw-agent.log` | 상태 변화·복구 시에만 한 줄씩 기록 |
+
+게이트웨이 launchd 레이블은 설치 시점에 `~/Library/LaunchAgents` 에서 이름에 `claw` 가 들어간 plist 를 찾아 고정한다 (에이전트 자신은 제외). 게이트웨이를 재설치해 레이블이 바뀌면 `install.sh` 를 다시 돌린다.
+
+## 제거
+
+```bash
+server/uninstall.sh          # 확인 프롬프트
+server/uninstall.sh --yes    # 묻지 않음
+```
+
+funnel 경로·LaunchAgent·데이터 폴더를 지운다. Tailscale 자체와 로그 파일은 남긴다. 공개 경로가 실제로 내려갔는지 `tailscale serve status` 로 다시 확인하며, 확인하지 못하면(tailscaled 가 꺼져 있을 때 포함 — `--bg` 로 저장된 공개 설정은 데몬 재기동 시 되살아난다) 아무것도 지우지 않고 중단한다 (토큰 파일이 남아야 재실행으로 같은 경로를 끌 수 있다). `--rotate-token` 도 같은 방식으로 옛 경로가 사라진 것을 확인한 뒤에만 새 토큰을 발급한다.
+
+## 동작 확인
+
+1. **외부망**(와이파이 끈 휴대폰 등)에서 URL 을 연다 → JSON 이 보여야 한다.
+   ```json
+   { "schema": 1, "checkedAt": "2026-09-29T03:12:45Z", "health": "ok",
+     "detail": "Telegram default", "intervalSeconds": 60, "autoHeal": true,
+     "lastHeal": null }
+   ```
+2. 1분쯤 뒤 새로고침 → `checkedAt` 이 갱신돼야 한다.
+3. 토큰 없이 `https://<서버 DNS 이름>:8443/` 를 열면 **404** 여야 한다 (토큰 경로만 공개). 설치 스크립트도 끝에 이것을 확인한다 — 404 가 아니라 2xx/3xx 면 중단, 이 맥에서 닿지 않으면 경고만 한다.
+
+## 알려진 한계
+
+- **서버 맥에서 메뉴바 앱도 쓴다면 앱의 openclaw 자동복구는 끈다.** 앱과 이 에이전트가 같은 게이트웨이를 각자 재시작해 이중 복구가 된다.
+- **status.json 심링크 바꿔치기.** funnel 은 root 인 tailscaled 가 경로의 파일을 서빙한다. 이 사용자 권한을 이미 가진 공격자가 `status.json`(또는 데이터 폴더)을 다른 파일로 가는 심링크로 바꾸면, 에이전트의 다음 쓰기(원자적 교체라 링크를 덮어쓴다)까지 그 대상 파일이 공개 URL 로 나갈 수 있다. 사용자 권한 탈취가 전제라 별도 방어는 두지 않는다.
+- **파일 모드 설정 전 짧은 틈.** 상태 파일은 임시 파일 교체 뒤 0644 로 모드를 고정하는데, 그 사이 잠깐은 umask 를 따른다. umask 가 느슨하면 그 틈에 다른 로컬 사용자가 쓸 수 있다. 서버 맥은 1인 사용을 전제로 한다.
+
+## 문제 해결
+
+- `tailscale funnel status` — 현재 공개 중인 경로 확인
+- `tail -f ~/Library/Logs/mongshell-openclaw-agent.log` — 에이전트 로그
+- `launchctl print gui/$(id -u)/com.mongshell.openclaw-agent` — 에이전트 실행 상태
+- funnel 설정이 권한 오류로 실패하면 위 `sudo tailscale set --operator=$USER` 를 확인한다.
