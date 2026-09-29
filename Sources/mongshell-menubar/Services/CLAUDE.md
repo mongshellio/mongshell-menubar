@@ -71,7 +71,7 @@ non_goals:
 
 ## 자격증명
 
-Claude 자격증명(OAuth 토큰)이 대상이다. openclaw 상태 URL 은 읽기 전용 capability URL 이라 `Preferences`(UserDefaults)에 두되, URL 이 곧 토큰이므로 로그·에러 문구에 넣지 않는다 (Decision #25).
+이 절의 규칙은 Claude 자격증명(OAuth 토큰)에 적용한다. openclaw 상태 URL 의 저장 위치는 [docs/architecture.md § Auth](../../../docs/architecture.md#auth) 가 권위이고, 여기서 지킬 운영 규칙은 하나다 — URL 이 곧 토큰이므로 로그·에러 문구에 넣지 않는다.
 
 - 토큰은 Keychain 에만 둔다. `UserDefaults`·파일·로그 어디에도 쓰지 않는다.
 - Anthropic 호스트 외 어디에도 전송하지 않는다.
