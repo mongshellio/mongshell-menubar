@@ -8,12 +8,6 @@ struct PopoverView: View {
     var onOpenSettings: () -> Void
     var onQuit: () -> Void
 
-    /// openclaw info is unified into this popover only when opted in AND
-    /// installed — otherwise the popover is identical to the plain build.
-    private var showOpenClaw: Bool {
-        prefs.menuBarTarget == .claudeAndOpenClaw && OpenClawService.isInstalled
-    }
-
     private var snap: UsageSnapshot { model.snapshot }
     private var fiveMeter: Meter { Meter(usedPercent: snap.fiveHourPercent, showRemaining: prefs.showRemaining) }
     /// Explicit label (both modes) so it's never ambiguous whether the
@@ -28,7 +22,7 @@ struct PopoverView: View {
             primaryGauge
             hairline
             weeklySection
-            if showOpenClaw {
+            if prefs.showsOpenClaw {
                 hairline
                 openClawSection
             }

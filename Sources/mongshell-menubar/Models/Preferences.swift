@@ -34,6 +34,12 @@ final class Preferences: ObservableObject {
     /// 🟡/🔴 감지 시 자동으로 launchctl 하드 재시작 수행 여부. 기본 꺼짐.
     @AppStorage("openClawAutoHeal") var openClawAutoHeal: Bool = false
 
+    /// openclaw 요소(메뉴바 신호등·팝오버 섹션)를 보일지의 단일 판정. 표시 조건을
+    /// 뷰마다 다시 적으면 한 곳만 바뀌어 메뉴바와 팝오버가 어긋난다.
+    var showsOpenClaw: Bool {
+        menuBarTarget == .claudeAndOpenClaw && OpenClawService.isInstalled
+    }
+
     private init() {}
 }
 

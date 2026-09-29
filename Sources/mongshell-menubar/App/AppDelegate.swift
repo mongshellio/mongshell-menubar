@@ -142,7 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             hideHoverSummary() // don't stack the hover summary under the full popover
             // Freshen openclaw before showing its section in the unified popover.
-            if prefs.menuBarTarget == .claudeAndOpenClaw, OpenClawService.isInstalled {
+            if prefs.showsOpenClaw {
                 openClaw.refreshNow()
             }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)

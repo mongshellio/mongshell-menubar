@@ -29,11 +29,10 @@ struct MenuBarIconView: View {
     }
 
     /// openclaw traffic-light color for the unified indicator, or nil when it
-    /// shouldn't show (Claude-only, or openclaw not installed → app looks
-    /// exactly like the plain build).
+    /// shouldn't show (`Preferences.showsOpenClaw` → app looks exactly like the
+    /// plain build).
     private var openClawDotColor: Color? {
-        guard prefs.menuBarTarget == .claudeAndOpenClaw, OpenClawService.isInstalled else { return nil }
-        return openClaw.health.dotColor
+        prefs.showsOpenClaw ? openClaw.health.dotColor : nil
     }
 
     var body: some View {

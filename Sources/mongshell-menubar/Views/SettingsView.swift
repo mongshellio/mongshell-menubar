@@ -10,11 +10,9 @@ struct SettingsView: View {
     private let intervals = [180, 300, 600, 900]
     private let openClawIntervals = [30, 60, 120]
 
-    /// Mirrors the live menu bar: the preview shows the openclaw dot only when
-    /// opted in AND installed.
+    /// Mirrors the live menu bar (same `showsOpenClaw` rule).
     private var openClawPreviewColor: Color? {
-        guard prefs.menuBarTarget == .claudeAndOpenClaw, OpenClawService.isInstalled else { return nil }
-        return openClaw.health.dotColor
+        prefs.showsOpenClaw ? openClaw.health.dotColor : nil
     }
 
     var body: some View {
