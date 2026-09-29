@@ -25,6 +25,9 @@ DOMAIN="gui/$(id -u)"
 STATUS_WAIT_SECONDS=40
 CURL_ATTEMPTS=6
 
+# 이 스크립트가 발급하는 형식(openssl rand -hex 16).
+TOKEN_PATTERN='^[0-9a-f]{32}$'
+
 INTERVAL=""
 # 에이전트(Options.minimumInterval/maximumInterval)와 같은 범위.
 MIN_INTERVAL=15
@@ -100,7 +103,50 @@ command -v openssl >/dev/null || die "openssl 이 없습니다."
 echo "  tailscale: $TAILSCALE ($DNS_NAME)"
 echo "  openclaw : $OPENCLAW"
 
-# ── 2. 빌드·배치 ───────────────────────────────────────────────────────────
+# ── 2. 토큰 ────────────────────────────────────────────────────────────────
+# 토큰·공개 포트 점검은 에이전트를 내리기 전에 한다 — 여기서 중단돼도 돌던
+# 에이전트는 그대로 감시를 계속한다.
+step "URL 토큰 준비"
+mkdir -p "$DATA_DIR"
+OLD_TOKEN=""
+if [[ -s "$TOKEN_FILE" ]]; then OLD_TOKEN="$(tr -d '[:space:]' <"$TOKEN_FILE")"; fi
+if [[ -n "$OLD_TOKEN" && ! "$OLD_TOKEN" =~ $TOKEN_PATTERN ]]; then
+  # 깨진 값으로는 내릴 경로를 믿고 만들 수 없으니 해제는 시도하지 않는다. 그 값으로
+  # 걸린 옛 경로가 남아 있다면 다음 단계(공개 포트 점검)가 남의 핸들러로 보고 중단한다.
+  warn "토큰 파일 형식이 올바르지 않아 새로 발급합니다: $TOKEN_FILE"
+  OLD_TOKEN=""
+fi
+if [[ -n "$OLD_TOKEN" && $ROTATE_TOKEN -eq 0 ]]; then
+  TOKEN="$OLD_TOKEN"
+  echo "  기존 토큰 재사용"
+else
+  if [[ -n "$OLD_TOKEN" ]]; then
+    # 옛 경로를 먼저 내려야 옛 URL 이 계속 살아 있지 않다. 내리지 못했거나 내린 뒤에도
+    # 남아 있으면 새 토큰을 만들지 않고 중단한다 (unpublish_path, fail-closed).
+    # 가정: '<같은 --https/--set-path> off' 가 그 경로 하나만 해제한다 (실기 미확인).
+    unpublish_path "$TAILSCALE" "$HOST_PORT" "/$OLD_TOKEN"
+    echo "  옛 공개 경로 해제 확인"
+  fi
+  TOKEN="$(openssl rand -hex 16)"
+  (umask 077 && printf '%s\n' "$TOKEN" > "$TOKEN_FILE")
+  chmod 0600 "$TOKEN_FILE"
+  echo "  새 토큰 발급"
+fi
+
+# ── 3. 공개 포트 점검 ──────────────────────────────────────────────────────
+# funnel 은 포트 전체를 공개하므로, 이 포트에 우리 토큰 경로 말고 다른 핸들러가
+# 있으면 그것까지 인터넷에 열린다. 확인할 수 없으면(설정 조회 실패) 진행하지 않는다.
+step "공개 포트 $FUNNEL_PORT 점검"
+HANDLERS="$(serve_handlers "$TAILSCALE" "$HOST_PORT")" \
+  || die "'tailscale serve status --json' 을 읽지 못해 포트 $FUNNEL_PORT 가 비어 있는지 확인할 수 없습니다."
+FOREIGN="$(grep -vxF -e '' -e "/$TOKEN" <<<"$HANDLERS" || true)"
+if [[ -n "$FOREIGN" ]]; then
+  die "포트 $FUNNEL_PORT 에 이 설치가 만들지 않은 serve 핸들러가 있습니다. funnel 을 켜면 함께 공개되므로 중단합니다:
+$(sed 's/^/  /' <<<"$FOREIGN")
+'tailscale serve status' 로 확인하고 정리한 뒤 다시 실행하세요."
+fi
+
+# ── 4. 빌드·배치 ───────────────────────────────────────────────────────────
 step "에이전트 빌드 (release)"
 swift build -c release --product "$PRODUCT" --package-path "$ROOT"
 BUILT="$(swift build -c release --package-path "$ROOT" --show-bin-path)/$PRODUCT"
@@ -112,7 +158,7 @@ launchctl bootout "$DOMAIN/$SELF_LABEL" 2>/dev/null || true
 install -m 0755 "$BUILT" "$BIN"
 echo "  → $BIN"
 
-# ── 3. 게이트웨이 레이블 ────────────────────────────────────────────────────
+# ── 5. 게이트웨이 레이블 ────────────────────────────────────────────────────
 # 에이전트의 폴백 탐색과 같은 규칙(정렬 후 이름에 claw 포함, 자기 레이블 제외)을
 # 설치 시점에 한 번 돌려 --gateway-label 로 고정한다.
 step "게이트웨이 launchd 레이블 탐색"
@@ -132,40 +178,7 @@ if [[ -z "$GATEWAY_LABEL" ]]; then
 fi
 echo "  → $GATEWAY_LABEL"
 
-# ── 4. 토큰 ────────────────────────────────────────────────────────────────
-step "URL 토큰 준비"
-OLD_TOKEN=""
-if [[ -s "$TOKEN_FILE" ]]; then OLD_TOKEN="$(tr -d '[:space:]' <"$TOKEN_FILE")"; fi
-if [[ -n "$OLD_TOKEN" && $ROTATE_TOKEN -eq 0 ]]; then
-  TOKEN="$OLD_TOKEN"
-  echo "  기존 토큰 재사용"
-else
-  if [[ -n "$OLD_TOKEN" ]]; then
-    # 옛 경로를 먼저 내려야 옛 URL 이 계속 살아 있지 않다.
-    # 가정: '<같은 --https/--set-path> off' 가 그 경로 하나만 해제한다 (실기 미확인).
-    "$TAILSCALE" funnel --https="$FUNNEL_PORT" --set-path="/$OLD_TOKEN" off 2>/dev/null \
-      || warn "옛 funnel 경로 해제 실패 — 'tailscale funnel status' 로 확인 후 수동으로 끄세요."
-  fi
-  TOKEN="$(openssl rand -hex 16)"
-  (umask 077 && printf '%s\n' "$TOKEN" > "$TOKEN_FILE")
-  chmod 0600 "$TOKEN_FILE"
-  echo "  새 토큰 발급"
-fi
-
-# ── 4b. 공개 포트 점검 ─────────────────────────────────────────────────────
-# funnel 은 포트 전체를 공개하므로, 이 포트에 우리 토큰 경로 말고 다른 핸들러가
-# 있으면 그것까지 인터넷에 열린다. 확인할 수 없으면(설정 조회 실패) 진행하지 않는다.
-step "공개 포트 $FUNNEL_PORT 점검"
-HANDLERS="$(serve_handlers "$TAILSCALE" "$HOST_PORT")" \
-  || die "'tailscale serve status --json' 을 읽지 못해 포트 $FUNNEL_PORT 가 비어 있는지 확인할 수 없습니다."
-FOREIGN="$(grep -vxF -e '' -e "/$TOKEN" <<<"$HANDLERS" || true)"
-if [[ -n "$FOREIGN" ]]; then
-  die "포트 $FUNNEL_PORT 에 이 설치가 만들지 않은 serve 핸들러가 있습니다. funnel 을 켜면 함께 공개되므로 중단합니다:
-$(sed 's/^/  /' <<<"$FOREIGN")
-'tailscale serve status' 로 확인하고 정리한 뒤 다시 실행하세요."
-fi
-
-# ── 5. LaunchAgent ─────────────────────────────────────────────────────────
+# ── 6. LaunchAgent ─────────────────────────────────────────────────────────
 step "LaunchAgent 등록"
 xml_escape() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
 
@@ -220,7 +233,7 @@ for _ in 1 2 3 4 5; do
 done
 [[ $bootstrapped -eq 1 ]] || die "launchctl bootstrap 실패. 'launchctl bootstrap $DOMAIN \"$PLIST\"' 를 직접 실행해 원인을 확인하세요."
 
-# ── 6. 첫 상태 파일 대기 ───────────────────────────────────────────────────
+# ── 7. 첫 상태 파일 대기 ───────────────────────────────────────────────────
 step "첫 상태 파일 대기 (최대 ${STATUS_WAIT_SECONDS}s)"
 waited=0
 until [[ -s "$STATUS_FILE" ]]; do
@@ -231,7 +244,7 @@ until [[ -s "$STATUS_FILE" ]]; do
 done
 echo "  → $STATUS_FILE"
 
-# ── 7. funnel ──────────────────────────────────────────────────────────────
+# ── 8. funnel ──────────────────────────────────────────────────────────────
 # 가정(개발 맥에 tailscale 이 없어 실기 확인 못 함): 파일 경로를 대상으로 주면
 # funnel 이 그 파일 하나를 --set-path 경로에 서빙하고, --bg 는 설정을 tailscaled
 # 에 영구 저장한다. --yes(확인 프롬프트 생략)는 버전에 따라 없을 수 있어 help 로
@@ -248,7 +261,7 @@ if ! "$TAILSCALE" "${FUNNEL_ARGS[@]}"; then
 를 한 번 실행한 뒤 다시 설치하세요. 관리 콘솔의 HTTPS 인증서·funnel nodeAttr 도 확인하세요 (README)."
 fi
 
-# ── 8. 확인 ────────────────────────────────────────────────────────────────
+# ── 9. 확인 ────────────────────────────────────────────────────────────────
 URL="https://$HOST_PORT/$TOKEN"
 step "공개 URL 확인"
 ok=0

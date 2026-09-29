@@ -5,6 +5,9 @@
 # 사용법: server/uninstall.sh [--yes]
 set -euo pipefail
 
+# shellcheck source=lib.sh
+source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+
 PRODUCT="mongshell-openclaw-agent"
 SELF_LABEL="com.mongshell.openclaw-agent"
 DATA_DIR="$HOME/Library/Application Support/$PRODUCT"
@@ -21,7 +24,7 @@ case "${1:-}" in
   *) echo "알 수 없는 인자: $1" >&2; exit 1 ;;
 esac
 
-warn() { printf '경고: %s\n' "$*" >&2; }
+die()  { printf '\n오류: %s\n' "$*" >&2; exit 1; }
 step() { printf '▶ %s\n' "$*"; }
 
 if [[ $ASSUME_YES -eq 0 ]]; then
@@ -30,21 +33,31 @@ if [[ $ASSUME_YES -eq 0 ]]; then
   if [[ ! "$answer" =~ ^[Yy]$ ]]; then echo "취소했습니다."; exit 0; fi
 fi
 
-step "LaunchAgent 해제"
-launchctl bootout "$DOMAIN/$SELF_LABEL" 2>/dev/null || echo "  (실행 중이 아님)"
-rm -f "$PLIST"
-
+# 공개 경로를 가장 먼저 내린다. 해제를 확인하지 못하면 아무것도 지우지 않고
+# 중단한다 — 토큰 파일이 남아 있어야 다시 실행해 같은 경로를 찾아 끌 수 있다.
 step "funnel 경로 해제"
 TOKEN=""
 if [[ -s "$TOKEN_FILE" ]]; then TOKEN="$(tr -d '[:space:]' <"$TOKEN_FILE")"; fi
 if [[ -z "$TOKEN" ]]; then
   echo "  (토큰 파일 없음 — 건너뜀)"
-elif ! command -v tailscale >/dev/null; then
-  warn "tailscale CLI 가 없어 funnel 경로 /$TOKEN 을 끄지 못했습니다."
-# 가정: install.sh 와 같은 --https/--set-path 에 off 를 주면 그 경로만 해제된다.
-elif ! tailscale funnel --https=8443 --set-path="/$TOKEN" off; then
-  warn "funnel 경로 해제 실패 — 'tailscale funnel status' 로 확인 후 수동으로 끄세요."
+elif ! pgrep -x tailscaled >/dev/null; then
+  echo "  (tailscaled 가 돌고 있지 않음 — 공개 중인 경로 없음)"
+else
+  TAILSCALE="$(command -v tailscale || true)"
+  [[ -n "$TAILSCALE" ]] \
+    || die "tailscaled 는 돌고 있는데 tailscale CLI 가 PATH 에 없어 공개 경로를 끌 수 없습니다. PATH 를 확인하고 다시 실행하세요."
+  DNS_NAME="$("$TAILSCALE" status --json 2>/dev/null | plutil -extract Self.DNSName raw -o - - 2>/dev/null || true)"
+  DNS_NAME="${DNS_NAME%.}"
+  [[ -n "$DNS_NAME" ]] \
+    || die "이 기기의 MagicDNS 이름을 얻지 못해 공개 경로를 확인할 수 없습니다. 'tailscale status' 를 확인하세요."
+  # 가정: install.sh 와 같은 --https/--set-path 에 off 를 주면 그 경로만 해제된다.
+  unpublish_path "$TAILSCALE" "$DNS_NAME:$FUNNEL_PORT" "/$TOKEN"
+  echo "  → 해제 확인"
 fi
+
+step "LaunchAgent 해제"
+launchctl bootout "$DOMAIN/$SELF_LABEL" 2>/dev/null || echo "  (실행 중이 아님)"
+rm -f "$PLIST"
 
 step "데이터 폴더 삭제"
 rm -rf "$DATA_DIR"

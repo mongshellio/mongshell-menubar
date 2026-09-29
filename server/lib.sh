@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# install.sh / uninstall.sh 공용: 공개 포트와 tailscale serve 설정 조회.
+# install.sh / uninstall.sh 공용: 공개 포트와 tailscale serve 설정 조회·경로 해제.
 # source 해서 쓴다. 호출 스크립트가 die() 를 정의해 둬야 한다.
 
 # 공개 전용 포트. funnel 은 포트 단위로 인터넷에 여므로, 443 에 tailnet 전용으로 둔
@@ -34,4 +34,23 @@ function run(argv) {
   return out.join("\n");
 }
 JS
+}
+
+# $1=tailscale CLI, $2="<DNS 이름>:<포트>", $3=경로("/<토큰>")
+# 경로가 걸려 있으면 funnel 에서 내리고, 설정을 다시 읽어 실제로 사라졌는지 확인한다.
+# 어느 단계든 실패하면 옛 URL 이 계속 공개돼 있을 수 있으므로 die 한다.
+# 원래 없던 경로면 할 일이 없다.
+unpublish_path() {
+  local cli="$1" host_port="$2" path="$3" handlers
+  local manual="tailscale funnel --https=${host_port##*:} --set-path=<경로> off"
+  handlers="$(serve_handlers "$cli" "$host_port")" \
+    || die "tailscale serve 설정을 읽지 못해 옛 공개 경로 해제 여부를 확인할 수 없습니다. 'tailscale serve status' 를 확인하세요."
+  grep -qxF -- "$path" <<<"$handlers" || return 0
+  "$cli" funnel --https="${host_port##*:}" --set-path="$path" off \
+    || die "옛 공개 경로 해제 실패. 'tailscale funnel status' 로 확인하고 '$manual' 로 끈 뒤 다시 실행하세요."
+  handlers="$(serve_handlers "$cli" "$host_port")" \
+    || die "해제 후 tailscale serve 설정을 다시 읽지 못했습니다. 'tailscale funnel status' 로 옛 경로가 꺼졌는지 확인하세요."
+  if grep -qxF -- "$path" <<<"$handlers"; then
+    die "해제 명령은 성공했지만 옛 공개 경로가 남아 있습니다. '$manual' 로 끈 뒤 다시 실행하세요."
+  fi
 }

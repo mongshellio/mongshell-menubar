@@ -80,7 +80,7 @@ server/uninstall.sh          # 확인 프롬프트
 server/uninstall.sh --yes    # 묻지 않음
 ```
 
-LaunchAgent·funnel 경로·데이터 폴더를 지운다. Tailscale 자체와 로그 파일은 남긴다.
+funnel 경로·LaunchAgent·데이터 폴더를 지운다. Tailscale 자체와 로그 파일은 남긴다. 공개 경로가 실제로 내려갔는지 `tailscale serve status` 로 다시 확인하며, 확인하지 못하면 아무것도 지우지 않고 중단한다 (토큰 파일이 남아야 재실행으로 같은 경로를 끌 수 있다). `--rotate-token` 도 같은 방식으로 옛 경로가 사라진 것을 확인한 뒤에만 새 토큰을 발급한다.
 
 ## 동작 확인
 
