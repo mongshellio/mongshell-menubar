@@ -37,8 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hoverPopover: NSPopover!
     /// Invisible, click-through window laid exactly over the status item while
     /// the hover summary is up; the summary is anchored to it rather than to
-    /// the button. A popover anchored to the button makes the system draw the
-    /// item as selected — right for the click popover, wrong for a hover.
+    /// the button. With the summary anchored to the button, the item's
+    /// background changed on hover as if it were selected — the anchoring is
+    /// the suspected cause (the system draws that highlight, so no API shows
+    /// it). The click popover stays anchored to the button.
     private var hoverAnchor: NSWindow?
     /// Closes the hover summary if the cursor is no longer over the icon — see
     /// `showHoverSummary`. Set while the summary is shown; if something other
@@ -158,9 +160,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let frame = statusItemFrameOnScreen else { return }
         let anchor = hoverAnchor ?? Self.makeHoverAnchor()
         hoverAnchor = anchor
+        guard let anchorView = anchor.contentView else { return }
         anchor.setFrame(frame, display: false)
         anchor.orderFrontRegardless()
-        guard let anchorView = anchor.contentView else { return }
         hoverPopover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
         // mouseExited normally closes the summary. If that event is ever
         // missed, nothing else would close an .applicationDefined popover, so
@@ -171,6 +173,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 if !self.hoverPopover.isShown || !self.isCursorOverStatusItem {
                     self.hideHoverSummary()
+                } else if let frame = self.statusItemFrameOnScreen {
+                    // The icon can change width while the summary is up (a
+                    // usage refresh); keep the anchor on it.
+                    self.hoverAnchor?.setFrame(frame, display: false)
                 }
             }
         }
@@ -198,7 +204,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.hasShadow = false
         window.ignoresMouseEvents = true
         window.level = .statusBar
-        window.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
+        // .fullScreenAuxiliary: the menu bar can be revealed over another
+        // app's full-screen space, and the summary has to show there too.
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         window.isExcludedFromWindowsMenu = true
         return window
     }
