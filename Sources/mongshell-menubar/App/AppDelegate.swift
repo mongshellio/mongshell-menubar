@@ -43,8 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// removes it.) The button still shows its own pressed state during the
     /// click.
     private var popoverAnchor: NSWindow?
-    /// The click during which the click popover last closed — see
-    /// `togglePopover`.
+    /// The click that made the click popover start closing, or nil when it
+    /// wasn't a click that closed it — see `togglePopover`.
     private var popoverClosingClick: Int?
     /// Closes the hover summary if the cursor is no longer over the icon — see
     /// `showHoverSummary`. Set while the summary is shown; if something other
@@ -156,14 +156,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         hostingView.layoutSubtreeIfNeeded()
         let w = max(24, hostingView.fittingSize.width)
         statusItem.length = w
-        // A popover that is up stays on the icon when the icon's width changes.
-        // Deferred in case the button hasn't taken the new length yet.
-        DispatchQueue.main.async { [weak self] in self?.syncPopoverAnchorFrame() }
-    }
-
-    private func syncPopoverAnchorFrame() {
-        guard popover.isShown || hoverPopover.isShown, let frame = statusItemFrameOnScreen else { return }
-        popoverAnchor?.setFrame(frame, display: false)
     }
 
     /// Show the instant hover summary below the icon. Suppressed while the full
@@ -197,17 +189,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if !popover.isShown { popoverAnchor?.orderOut(nil) }
     }
 
-    /// Shows `popover` under the icon, anchored to `popoverAnchor`. Returns
+    /// Shows `target` under the icon, anchored to `popoverAnchor`. Returns
     /// whether it was shown — false when the status item isn't on screen — so
     /// the caller can skip what only makes sense for a visible popover.
-    private func showBelowIcon(_ popover: NSPopover) -> Bool {
+    ///
+    /// The anchor is placed once, here: a popover that is up keeps the spot
+    /// it opened at even if the icon moves or changes width meanwhile.
+    private func showBelowIcon(_ target: NSPopover) -> Bool {
         guard let frame = statusItemFrameOnScreen else { return false }
         let anchor = popoverAnchor ?? Self.makePopoverAnchor()
         popoverAnchor = anchor
         guard let anchorView = anchor.contentView else { return false }
         anchor.setFrame(frame, display: false)
         anchor.orderFrontRegardless()
-        popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
+        target.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
         return true
     }
 
@@ -244,11 +239,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return
         }
         // The popover is .transient, so a click on the icon while it is open
-        // counts as a click outside it: AppKit has already closed it by the
-        // time this runs, and then the same click arrives here. Opening again
+        // counts as a click outside it: AppKit starts closing it on the
+        // mouse-down, and then the same click arrives here. A quick click gets
+        // here while the close is still animating and takes the branch above.
+        // A long press gets here after it has finished closing — opening again
         // would leave the icon unable to close its own popover. (With the
         // popover anchored to the button, AppKit swallowed that click itself.)
         if let click = Self.clickNumber(of: NSApp.currentEvent), click == popoverClosingClick {
+            popoverClosingClick = nil
             return
         }
         hideHoverSummary() // don't stack the hover summary under the full popover
@@ -260,17 +258,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentViewController?.view.window?.makeKey()
     }
 
-    /// Only the click popover has a delegate.
-    func popoverDidClose(_ notification: Notification) {
+    // Only the click popover has a delegate.
+
+    /// Recorded when the close starts, not when it ends: by the end of the
+    /// animation the current event may be a drag or nothing at all.
+    func popoverWillClose(_ notification: Notification) {
         popoverClosingClick = Self.clickNumber(of: NSApp.currentEvent)
+    }
+
+    func popoverDidClose(_ notification: Notification) {
         if !hoverPopover.isShown { popoverAnchor?.orderOut(nil) }
     }
 
-    /// The number a mouse-down shares with its mouse-up, or nil for any other
-    /// event — `eventNumber` raises on events that aren't mouse events.
+    /// The number a mouse-down shares with the drags and the mouse-up that
+    /// follow it, or nil for any other event — `eventNumber` raises on events
+    /// that aren't mouse events.
     private static func clickNumber(of event: NSEvent?) -> Int? {
-        guard let event, event.type == .leftMouseDown || event.type == .leftMouseUp else { return nil }
-        return event.eventNumber
+        guard let event else { return nil }
+        switch event.type {
+        case .leftMouseDown, .leftMouseDragged, .leftMouseUp: return event.eventNumber
+        default: return nil
+        }
     }
 
     /// Also the target of the app's ⌘, command (`MongshellMenubarApp`).
