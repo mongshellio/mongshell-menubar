@@ -31,29 +31,16 @@ final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    /// The click popover — a window of our own placed under the icon, not an
-    /// NSPopover. A popover anchored to the status item button makes the
-    /// system draw the item as selected for as long as it is up, and there is
-    /// no API to turn that highlight off. So opening, closing and placing it
-    /// are ours to do, in the same structure the Stats app uses: see
-    /// `togglePopover`.
-    private var popoverWindow: NSWindow!
-    /// When the click popover last closed itself by losing key while the
-    /// cursor was over the icon (system uptime) — see `togglePopover`.
-    private var popoverLostKeyUnderCursorAt: TimeInterval?
-    /// How long after that a click on the icon still counts as the click that
-    /// closed it. Long enough for the press to be released, short enough that
-    /// a separate click is rarely swallowed (Decision #8, follow-up #38).
-    private static let closingClickWindow: TimeInterval = 1
+    private var popover: NSPopover!
     private var hoverPopover: NSPopover!
     /// Invisible, click-through window laid exactly over the status item while
     /// the hover summary is up; the summary is anchored to it rather than to
     /// the button. With the summary anchored to the button, the item's
     /// background changed on hover as if it were selected — the anchoring is
     /// the suspected cause (the system draws that highlight, so no API shows
-    /// it). The click popover isn't a popover at all — see `popoverWindow`.
+    /// it). The click popover stays anchored to the button.
     private var hoverAnchor: NSWindow?
     /// Closes the hover summary if the cursor is no longer over the icon — see
     /// `showHoverSummary`. Set while the summary is shown; if something other
@@ -99,12 +86,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.action = #selector(togglePopover)
         }
 
-        popoverWindow = Self.makePopoverWindow(content: PopoverView(
+        popover = NSPopover()
+        popover.behavior = .transient
+        let content = PopoverView(
             model: model, prefs: prefs, openClaw: openClaw,
             onOpenSettings: { [weak self] in self?.openSettings() },
             onQuit: { NSApp.terminate(nil) }
-        ))
-        popoverWindow.delegate = self
+        )
+        let hc = NSHostingController(rootView: content)
+        hc.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = hc
 
         // Instant hover summary: a lightweight popover shown the moment the
         // cursor enters the icon and closed when it leaves — no native-tooltip
@@ -165,7 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Show the instant hover summary below the icon. Suppressed while the full
     /// click popover is open so the two never stack.
     private func showHoverSummary() {
-        guard !popoverWindow.isVisible, !hoverPopover.isShown,
+        guard !popover.isShown, !hoverPopover.isShown,
               let frame = statusItemFrameOnScreen else { return }
         let anchor = hoverAnchor ?? Self.makeHoverAnchor()
         hoverAnchor = anchor
@@ -230,89 +221,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func togglePopover() {
-        if popoverWindow.isVisible {
-            popoverWindow.orderOut(nil)
-            // Closing it here also makes it resign key; that resign isn't an
-            // icon press that already closed it, so it mustn't swallow the
-            // next click.
-            popoverLostKeyUnderCursorAt = nil
-            return
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            hideHoverSummary() // don't stack the hover summary under the full popover
+            // Freshen openclaw before showing its section in the unified popover.
+            if prefs.showsOpenClaw {
+                openClaw.refreshNow()
+            }
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
         }
-        // Pressing the icon while the popover is open takes key away from it,
-        // so it has already closed itself (`windowDidResignKey`) by the time
-        // this click's action gets here — seen on a real machine: it closed
-        // and opened again. That click was the close; don't open again.
-        if let lostKeyAt = popoverLostKeyUnderCursorAt {
-            popoverLostKeyUnderCursorAt = nil
-            if ProcessInfo.processInfo.systemUptime - lostKeyAt < Self.closingClickWindow { return }
-        }
-        guard let icon = statusItemFrameOnScreen,
-              let size = popoverWindow.contentViewController?.view.fittingSize else { return }
-        hideHoverSummary() // don't stack the hover summary under the full popover
-        // Freshen openclaw before showing its section in the unified popover.
-        if prefs.showsOpenClaw {
-            openClaw.refreshNow()
-        }
-        // The window closes when it stops being key (`windowDidResignKey`),
-        // and a window is only key in the active app. A click in another
-        // window or app takes key away; a click that doesn't (another menu bar
-        // item, say) leaves it open.
-        NSApp.activate(ignoringOtherApps: true)
-        popoverWindow.setFrame(Self.popoverFrame(size: size, under: icon), display: true)
-        popoverWindow.makeKeyAndOrderFront(nil)
-    }
-
-    /// Only `popoverWindow` has this delegate.
-    func windowDidResignKey(_ notification: Notification) {
-        guard (notification.object as? NSWindow) === popoverWindow, popoverWindow.isVisible else { return }
-        popoverLostKeyUnderCursorAt = isCursorOverStatusItem ? ProcessInfo.processInfo.systemUptime : nil
-        popoverWindow.orderOut(nil)
-    }
-
-    /// A titled window with its title bar hidden, so it gets the system's
-    /// rounded corners and shadow and can become key (a borderless one can't).
-    /// It sizes itself to the SwiftUI content and grows downward from its top
-    /// edge when the content does.
-    private static func makePopoverWindow<Content: View>(content: Content) -> NSWindow {
-        let hosting = NSHostingController(rootView: content)
-        hosting.sizingOptions = [.preferredContentSize]
-        // The content runs under the hidden title bar; without this SwiftUI
-        // would inset it by the title bar's height.
-        hosting.safeAreaRegions = []
-        let window = NSWindow(contentRect: .zero, styleMask: [.titled, .fullSizeContentView],
-                              backing: .buffered, defer: true)
-        window.contentViewController = hosting
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.isMovable = false
-        window.isReleasedWhenClosed = false
-        window.backgroundColor = .clear
-        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-        return window
-    }
-
-    /// Gap between the menu bar and the top of the click popover.
-    private static let popoverGapBelowIcon: CGFloat = 3
-    /// Least distance kept between the click popover and the screen's sides.
-    private static let popoverScreenMargin: CGFloat = 3
-
-    /// Centered under the icon, pulled back inside the icon's screen when
-    /// centering would run it off a side.
-    private static func popoverFrame(size: NSSize, under icon: NSRect) -> NSRect {
-        var x = icon.midX - size.width / 2
-        let iconCenter = NSPoint(x: icon.midX, y: icon.midY)
-        if let screen = NSScreen.screens.first(where: { $0.frame.contains(iconCenter) }) ?? NSScreen.main {
-            x = min(x, screen.frame.maxX - size.width - popoverScreenMargin)
-            x = max(x, screen.frame.minX + popoverScreenMargin)
-        }
-        return NSRect(x: x, y: icon.minY - popoverGapBelowIcon - size.height,
-                      width: size.width, height: size.height)
     }
 
     /// Also the target of the app's ⌘, command (`MongshellMenubarApp`).
     func openSettings() {
-        popoverWindow.orderOut(nil)
-        popoverLostKeyUnderCursorAt = nil // same as in `togglePopover`: closed by us
+        popover.performClose(nil)
         // Re-read the login-item state on every open. The window (and its view
         // hierarchy) is retained across closes, so `.onAppear` would fire only
         // once — this is the reliable point to catch a change made directly in
