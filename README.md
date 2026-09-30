@@ -141,7 +141,7 @@ swift-testing 을 요구하는데 둘 다 Command Line Tools 에 들어 있지 �
 ```
 Sources/mongshell-menubar/
   MongshellMenubarApp.swift            @main (Settings 씬은 비어 있음, ⌘, 는 실제 설정창으로 연결 — UI는 상태바+팝오버)
-  App/AppDelegate.swift     NSStatusItem + 클릭 팝오버 창 + hover 팝오버 + 설정창 관리
+  App/AppDelegate.swift     NSStatusItem + NSPopover + 설정창 관리
   App/SnapshotRenderer.swift 오프스크린 PNG QA 렌더러(MONGSHELL_SNAPSHOT)
   Views/ClaudeMarkView.swift Claude 스타버스트 마크 Canvas 렌더러
   Views/MenuBarIconView.swift 상태바 마크 + 5h/7d 링 게이지(+5h 초기화 시각),
