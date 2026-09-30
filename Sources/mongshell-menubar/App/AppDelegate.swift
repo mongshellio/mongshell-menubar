@@ -35,6 +35,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var hoverPopover: NSPopover!
+    /// Closes the hover summary if the cursor is no longer over the icon — see
+    /// `showHoverSummary`. Non-nil only while the summary is shown.
+    private var hoverWatchdog: Timer?
+    /// How often the watchdog looks. A missed mouseExited is rare, so this only
+    /// bounds how long a stray summary can stay up.
+    private static let hoverWatchdogInterval: TimeInterval = 0.5
     private var settingsWindow: NSWindow?
     private var hostingView: PassthroughHostingView<MenuBarIconView>!
     private var cancellables = Set<AnyCancellable>()
@@ -84,12 +90,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Instant hover summary: a lightweight popover shown the moment the
         // cursor enters the icon and closed when it leaves — no native-tooltip
-        // delay. .transient lets AppKit also dismiss it on app switch / outside
-        // interaction, so it can't linger if mouseExited never fires (e.g.
-        // Cmd-Tab away without moving the cursor); the tracking-area callbacks
-        // below drive the normal show/close.
+        // delay. The tracking-area callbacks below drive the normal show/close.
+        //
+        // Not .transient: AppKit dismisses a transient popover on a click
+        // outside it and swallows that click, so the first click on the icon
+        // only closed the summary and `togglePopover` never ran — the full
+        // popover took a second click. With .applicationDefined the click
+        // reaches the button, and we close the summary ourselves; the watchdog
+        // in `showHoverSummary` covers a missed mouseExited, which .transient
+        // used to cover.
         hoverPopover = NSPopover()
-        hoverPopover.behavior = .transient
+        hoverPopover.behavior = .applicationDefined
         hoverPopover.animates = false
         let hoverHC = NSHostingController(rootView: HoverSummaryView(model: model, prefs: prefs))
         hoverHC.sizingOptions = [.preferredContentSize]
@@ -135,10 +146,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showHoverSummary() {
         guard let button = statusItem.button, !popover.isShown, !hoverPopover.isShown else { return }
         hoverPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        // mouseExited normally closes the summary. If that event is ever
+        // missed, nothing else would close an .applicationDefined popover, so
+        // check the cursor position while the summary is up.
+        hoverWatchdog?.invalidate()
+        hoverWatchdog = Timer.scheduledTimer(withTimeInterval: Self.hoverWatchdogInterval,
+                                             repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.isCursorOverStatusItem else { return }
+                self.hideHoverSummary()
+            }
+        }
     }
 
     private func hideHoverSummary() {
+        hoverWatchdog?.invalidate()
+        hoverWatchdog = nil
         hoverPopover.performClose(nil)
+    }
+
+    private var isCursorOverStatusItem: Bool {
+        guard let button = statusItem.button, let window = button.window else { return false }
+        let frameOnScreen = window.convertToScreen(button.convert(button.bounds, to: nil))
+        return frameOnScreen.contains(NSEvent.mouseLocation)
     }
 
     @objc private func togglePopover() {
