@@ -10,7 +10,7 @@ openclaw 게이트웨이가 24시간 도는 **서버 맥**에 설치하는 감�
 1. [준비물 체크리스트](#1-준비물-체크리스트)
 2. [서버 맥 설치](#2-서버-맥-설치) — A. 기본 도구 · B. Tailscale · C. 관리 콘솔 · D. 상시 가동 · E. install.sh · F. 동작 확인
 3. [각 맥북 설정](#3-각-맥북-설정) — [서버 점 (전원·디스크)](#서버-점-전원디스크)
-4. [일상 운영](#4-일상-운영)
+4. [일상 운영](#4-일상-운영) — [명령 모음](#서버-맥-명령-모음) · [한눈에 보기](#한눈에-보기)
 5. [문제 해결](#5-문제-해결)
 6. [첫 설치 때 확인할 것 (실기 미검증 가정)](#6-첫-설치-때-확인할-것-실기-미검증-가정)
 7. [알려진 한계](#7-알려진-한계)
@@ -144,16 +144,21 @@ tailscale status --json | plutil -extract Self.Tags json -o - -     # → ["tag:
 
 에이전트는 사용자 LaunchAgent 라 **해당 사용자가 로그인해 있어야** 돈다 (화면 잠금은 괜찮다).
 
-- [ ] 시스템 설정 → 잠금 화면/에너지: **잠자기 방지** (디스플레이는 꺼져도 됨)
-- [ ] 시스템 설정 → 사용자 및 그룹: 재부팅 후 **자동 로그인** 켜기. FileVault 가 켜져 있으면 macOS 가 자동 로그인을 허용하지 않는다 — 이 경우 정전·재부팅 뒤에는 직접 로그인해야 에이전트가 다시 돈다.
-- [ ] 정전 복구 후 자동 시작:
+- [ ] **잠자기 끄기** — 덮개를 닫아도, 조작이 없어도 잠들지 않게 한다 (디스플레이는 꺼져도 된다). 전원 종류(어댑터·배터리)와 무관하게 적용된다.
+  ```bash
+  sudo pmset -a disablesleep 1
+  pmset -g | grep SleepDisabled       # → SleepDisabled 1
+  ```
+  적용하면 Apple 메뉴의 "잠자기" 가 비활성화된다. 어댑터 없이 두면 배터리가 0% 까지 방전되고, 덮은 채 가방에 넣으면 켜진 채로 뜨거워진다 — 서버 맥을 들고 나갈 때는 `sudo pmset -a disablesleep 0` 으로 되돌리거나 전원을 끈다. 실기 확인: 맥북 프로(M1 Pro, macOS 27)에서 덮개를 닫은 채 계속 동작했다.
+- [ ] 시스템 설정 → 사용자 및 그룹: 재부팅 후 **자동 로그인** 켜기. FileVault 가 켜져 있으면 macOS 가 자동 로그인을 허용하지 않는다 — 이 경우 재부팅(macOS 업데이트 포함) 뒤에는 **로그인 화면에서 비밀번호를 한 번 입력**해야 디스크가 풀린다. 그 뒤 tailscaled 는 부팅 데몬으로, 게이트웨이와 에이전트는 로그인 시 LaunchAgent 로 다시 뜬다. 로그인 뒤 [한눈에 보기](#한눈에-보기) 의 `공개 URL 응답` 이 `200` 인지 본다 — funnel 공개가 재부팅 뒤 유지되는지는 [6](#6-첫-설치-때-확인할-것-실기-미검증-가정) 가정 4 (미확인).
+- [ ] 정전 복구 후 자동 시작 (배터리 없는 서버 — 맥 미니 등):
   ```bash
   sudo pmset -a autorestart 1
-  pmset -g | grep -E '^ *(sleep|autorestart)'
+  pmset -g | grep -E '^ *autorestart'
   ```
-  성공: `sleep 0` (또는 잠자기 방지 설정), `autorestart 1`. 모델에 따라 `autorestart` 줄이 안 보일 수 있다 (미지원 기기).
+  성공: `autorestart 1`. 모델에 따라 `autorestart` 줄이 안 보일 수 있다 (미지원 기기). 맥북은 배터리가 있어 정전으로 꺼질 일이 드물다.
 
-> **배터리가 있는 서버(맥북)라면.** 어댑터가 빠져 배터리로 도는 동안 맥이 잠들면 에이전트도 함께 멈춘다. 그러면 맥북의 서버 점은 🟡/🔴 로 바뀌기 전에 ⚪ 연락 두절이 될 수 있고, 전원 알림도 오지 않는다 (두절은 알리지 않는다). 잠자기 설정은 전원별로 따로 있으므로 배터리 쪽도 확인한다: `pmset -g custom` 의 `Battery Power:` 블록에서 `sleep` 값을 본다. 두절된 뒤에는 팝오버의 서버 섹션에 마지막으로 받은 값이 흐리게 남는다.
+> **배터리가 있는 서버(맥북)라면.** 잠자기를 껐으면 어댑터가 빠져도 계속 돌고, 다음 확인에서 🟡 `어댑터 분리`, 잔량 20% 이하에서 🔴 `배터리 부족` 알림이 온다 — 그때 꽂는다. 다 방전돼 꺼지면 ⚪ 연락 두절이 되고, 두절은 알리지 않는다. 두절된 뒤에는 팝오버의 서버 섹션에 마지막으로 받은 값이 흐리게 남는다.
 
 ### E. `server/install.sh` 실행
 
@@ -333,6 +338,56 @@ tailscale status --json | plutil -extract Self.Tags json -o - -     # → ["tag:
 
 명령은 모두 **서버 맥**, repo 루트 기준이다.
 
+### 서버 맥 명령 모음
+
+평소에 쓰는 것을 한 곳에 모았다. 자세한 설명은 각 항목의 링크에 있다.
+
+| 용도 | 명령 |
+|---|---|
+| 잘 돌고 있나 한눈에 보기 | 아래 [한눈에 보기](#한눈에-보기) 블록 |
+| 덮어도 잠들지 않게 | `sudo pmset -a disablesleep 1` ([D](#d-상시-가동)) |
+| 들고 나갈 때 되돌리기 | `sudo pmset -a disablesleep 0` |
+| 재부팅·macOS 업데이트 뒤 | 로그인 화면에서 비밀번호 입력 → 한눈에 보기로 확인 ([D](#d-상시-가동)) |
+| 상태 URL 다시 보기 | [URL 다시 보기](#url-다시-보기) |
+| 코드 업데이트 | `git pull && server/install.sh` ([코드 업데이트](#코드-업데이트)) |
+| 토큰 교체 (URL 유출 시) | `server/install.sh --rotate-token` ([토큰 교체](#토큰-교체)) |
+| 주기·자동복구 변경 | `server/install.sh --interval N` / `--no-auto-heal` ([자동복구 끄기 / 주기 변경](#자동복구-끄기--주기-변경)) |
+| 로그 따라 보기 | `tail -f ~/Library/Logs/mongshell-openclaw-agent.log` |
+| 문제가 있을 때 자세히 | [5-3. 진단 명령](#5-3-서버-맥-진단-명령) |
+| 제거 | `server/uninstall.sh` ([제거](#제거)) |
+
+### 한눈에 보기
+
+아래를 통째로 붙여넣으면 서비스 실행 여부·잠자기 설정·전원·마지막 판정·공개 URL 응답을 한 화면에 출력한다.
+```bash
+GW=ai.openclaw.gateway   # [E] "▶ 게이트웨이 launchd 레이블 탐색" 의 → 값이 다르면 바꾼다
+D="$HOME/Library/Application Support/mongshell-openclaw-agent"
+for L in "$GW" com.mongshell.openclaw-agent; do
+  echo "$L: $(launchctl print gui/$(id -u)/$L 2>/dev/null | grep -m1 -oE 'state = [a-z]+' || echo '등록 안 됨')"
+done
+echo "tailscaled: $(pgrep -qx tailscaled && echo running || echo '실행 안 됨')"
+echo "잠자기 끔 (SleepDisabled): $(pmset -g | awk '/SleepDisabled/{print $2}')"
+P="$(pmset -g batt | grep -oE '[0-9]+%; [a-zA-Z ]+' | head -1)"; echo "전원: ${P:-내장 배터리 없음 (디스크만 판정)}"
+echo "checkedAt: $(plutil -extract checkedAt raw -o - "$D/status.json")  (지금 $(date -u +%Y-%m-%dT%H:%M:%SZ))"
+echo "판정 openclaw / 서버: $(plutil -extract health raw -o - "$D/status.json") / $(plutil -extract host.health raw -o - "$D/status.json" 2>/dev/null || echo '없음 — 구버전 에이전트 또는 host null ([F])')"
+DNS="$(tailscale status --json | plutil -extract Self.DNSName raw -o - - | sed 's/\.$//')"
+echo "공개 URL 응답: $(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://$DNS:8443/$(tr -d '[:space:]' < "$D/token")")"
+```
+정상이면 이렇게 보인다 (값은 예시):
+```
+ai.openclaw.gateway: state = running
+com.mongshell.openclaw-agent: state = running
+tailscaled: running
+잠자기 끔 (SleepDisabled): 1
+전원: 100%; charged
+checkedAt: 2026-09-30T11:48:39Z  (지금 2026-09-30T11:49:23Z)
+판정 openclaw / 서버: ok / ok
+공개 URL 응답: 200
+```
+- `checkedAt` 이 "지금" 보다 주기의 3배(최소 180초) 넘게 오래됐으면 에이전트가 멈춘 것이다 — 맥북도 이때 ⚪ 로 본다 → [5-3](#5-3-서버-맥-진단-명령).
+- `공개 URL 응답` 이 `200` 이 아니면 → [5-2](#5-2-공개-url--메뉴바-증상별). 이 맥에서의 응답은 외부 공개의 증거로는 부족하다 ([6](#6-첫-설치-때-확인할-것-실기-미검증-가정) 가정 8).
+- `잠자기 끔` 이 `0` 이거나 비어 있으면 덮개를 닫을 때 잠든다 → [D](#d-상시-가동).
+
 ### URL 다시 보기
 
 토큰 파일과 MagicDNS 이름으로 URL 을 다시 만든다 (토큰은 바뀌지 않는다):
@@ -479,6 +534,8 @@ funnel 경로 → LaunchAgent → 데이터 폴더(토큰·설치 옵션 포함)
 
 ### 5-3. 서버 맥 진단 명령
 
+평소 확인은 [4. 한눈에 보기](#한눈에-보기) 로 충분하다. 아래는 거기서 이상이 보였을 때 원인을 좁히는 명령이다.
+
 ```bash
 tailscale funnel status                                             # 현재 공개 중인 경로
 tailscale serve status --json                                       # serve 설정 원문
@@ -559,7 +616,7 @@ rm ~/openclaw-install.log
 - **status.json 심링크 바꿔치기.** funnel 은 root 인 tailscaled 가 경로의 파일을 서빙한다. 이 사용자 권한을 이미 가진 공격자가 `status.json`(또는 데이터 폴더)을 다른 파일로 가는 심링크로 바꾸면, 에이전트의 다음 쓰기(원자적 교체라 링크를 덮어쓴다)까지 그 대상 파일이 공개 URL 로 나갈 수 있다. 사용자 권한 탈취가 전제라 별도 방어는 두지 않는다.
 - **파일 모드 설정 전 짧은 틈.** 상태 파일은 임시 파일 교체 뒤 0644 로 모드를 고정하는데, 그 사이 잠깐은 umask 를 따른다. umask 가 느슨하면 그 틈에 다른 로컬 사용자가 쓸 수 있다. 서버 맥은 1인 사용을 전제로 한다.
 - **서버 호스트 신호의 실기 확인 기록이 없다.** 전원·디스크 판정 규칙과 JSON 형식은 자동 테스트가 지키지만, 실제 서버 맥에서 어댑터를 뽑거나 디스크를 채워 확인한 기록은 이 문서에 아직 없다. 전원 정보 해석의 테스트는 IOKit 의 키 이름으로 손수 만든 입력을 쓴다 — 실제 기기가 돌려주는 값과 다를 가능성은 남아 있다.
-- **배터리 구동 중 잠자기.** 서버가 배터리로 돌다 잠들면 에이전트가 멈춰, 🔴 `배터리 부족` 이나 그 알림 없이 ⚪ 연락 두절로 넘어갈 수 있다 ([D](#d-상시-가동)).
+- **잠자기를 끄지 않은 경우의 배터리 구동.** [D](#d-상시-가동) 의 `disablesleep` 을 적용하지 않은 서버가 배터리로 돌다 잠들면 에이전트가 멈춰, 🔴 `배터리 부족` 이나 그 알림 없이 ⚪ 연락 두절로 넘어갈 수 있다.
 - **UPS 는 읽지 않는다.** 내장 배터리만 전원 신호로 본다. 내장 배터리가 없는 서버는 UPS 가 있어도 전원 신호가 없고, 내장 배터리가 있는 서버가 UPS 전원으로 돌면 "어댑터 연결" 로 본다.
 - **임계값에 여유 구간(히스테리시스)이 없다.** 값이 임계 바로 근처면 점 색이 확인 주기마다 오갈 수 있다. 알림은 1시간 쿨다운으로 묶이고, 쿨다운에 눌린 알림은 쿨다운 뒤에도 나쁜 상태일 때 한 번 온다.
 - **공개되는 수치로 서버 상태를 추정할 수 있다.** 배터리 잔량(퍼센트)과 디스크 여유(바이트)가 정밀값으로 실린다. 상태 URL 이 새어 나가면 그 변화로 서버의 활동·전원 상태를 짐작할 수 있다. 값을 뭉뚱그리지 않은 것은 의도한 위험 수용이다 (Decision #31) — 유출이 의심되면 [토큰 교체](#토큰-교체).
