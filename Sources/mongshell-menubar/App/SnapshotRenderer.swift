@@ -1,6 +1,16 @@
 import SwiftUI
 import AppKit
 
+/// A titled window that stays where it is put. AppKit constrains a titled
+/// window's frame onto a screen when it is ordered front, so a window parked at
+/// (-20000, -20000) would be dragged to the bottom-left corner of a display and
+/// flash there for every settings capture.
+private final class OffscreenWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
+}
+
 /// Offscreen PNG rendering for visual QA (no screen-recording permission
 /// needed). Triggered by the MONGSHELL_SNAPSHOT=<dir> env var; renders reference
 /// images then exits.
@@ -63,8 +73,8 @@ enum SnapshotRenderer {
     /// and never becomes key.
     private static func writeWindowed<V: View>(_ view: V, size: NSSize,
                                                to dir: URL, _ name: String) {
-        let win = NSWindow(contentRect: NSRect(origin: .zero, size: size),
-                           styleMask: [.titled], backing: .buffered, defer: false)
+        let win = OffscreenWindow(contentRect: NSRect(origin: .zero, size: size),
+                                  styleMask: [.titled], backing: .buffered, defer: false)
         // Programmatic NSWindow defaults to isReleasedWhenClosed == true, so
         // close() below would have AppKit release the window on top of ARC's
         // own release of `win` — an over-release that crashes in the launch
