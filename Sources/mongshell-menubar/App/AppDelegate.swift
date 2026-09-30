@@ -31,17 +31,21 @@ final class PassthroughHostingView<Content: View>: NSHostingView<Content> {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var hoverPopover: NSPopover!
     /// Invisible, click-through window laid exactly over the status item while
-    /// the hover summary is up; the summary is anchored to it rather than to
-    /// the button. With the summary anchored to the button, the item's
-    /// background changed on hover as if it were selected — the anchoring is
-    /// the suspected cause (the system draws that highlight, so no API shows
-    /// it). The click popover stays anchored to the button.
-    private var hoverAnchor: NSWindow?
+    /// either popover is up; both are anchored to it rather than to the button.
+    /// A popover anchored to the button makes the system draw the item as
+    /// selected for as long as it is shown. (The system draws that highlight
+    /// and no API reports it; it was confirmed by eye that anchoring here
+    /// removes it.) The button still shows its own pressed state during the
+    /// click.
+    private var popoverAnchor: NSWindow?
+    /// The click during which the click popover last closed — see
+    /// `togglePopover`.
+    private var popoverClosingClick: Int?
     /// Closes the hover summary if the cursor is no longer over the icon — see
     /// `showHoverSummary`. Set while the summary is shown; if something other
     /// than `hideHoverSummary` closes the summary, it clears itself on its
@@ -88,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         popover = NSPopover()
         popover.behavior = .transient
+        popover.delegate = self
         let content = PopoverView(
             model: model, prefs: prefs, openClaw: openClaw,
             onOpenSettings: { [weak self] in self?.openSettings() },
@@ -151,19 +156,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hostingView.layoutSubtreeIfNeeded()
         let w = max(24, hostingView.fittingSize.width)
         statusItem.length = w
+        // A popover that is up stays on the icon when the icon's width changes.
+        // Deferred in case the button hasn't taken the new length yet.
+        DispatchQueue.main.async { [weak self] in self?.syncPopoverAnchorFrame() }
+    }
+
+    private func syncPopoverAnchorFrame() {
+        guard popover.isShown || hoverPopover.isShown, let frame = statusItemFrameOnScreen else { return }
+        popoverAnchor?.setFrame(frame, display: false)
     }
 
     /// Show the instant hover summary below the icon. Suppressed while the full
     /// click popover is open so the two never stack.
     private func showHoverSummary() {
-        guard !popover.isShown, !hoverPopover.isShown,
-              let frame = statusItemFrameOnScreen else { return }
-        let anchor = hoverAnchor ?? Self.makeHoverAnchor()
-        hoverAnchor = anchor
-        guard let anchorView = anchor.contentView else { return }
-        anchor.setFrame(frame, display: false)
-        anchor.orderFrontRegardless()
-        hoverPopover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
+        guard !popover.isShown, !hoverPopover.isShown, showBelowIcon(hoverPopover) else { return }
         // mouseExited normally closes the summary. If that event is ever
         // missed, nothing else would close an .applicationDefined popover, so
         // check the cursor position while the summary is up.
@@ -173,10 +179,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 if !self.hoverPopover.isShown || !self.isCursorOverStatusItem {
                     self.hideHoverSummary()
-                } else if let frame = self.statusItemFrameOnScreen {
-                    // The icon can change width while the summary is up (a
-                    // usage refresh); keep the anchor on it.
-                    self.hoverAnchor?.setFrame(frame, display: false)
                 }
             }
         }
@@ -190,12 +192,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hoverWatchdog?.invalidate()
         hoverWatchdog = nil
         hoverPopover.performClose(nil)
-        hoverAnchor?.orderOut(nil)
+        // mouseExited lands here while the click popover is open too, and that
+        // popover is on the same anchor.
+        if !popover.isShown { popoverAnchor?.orderOut(nil) }
+    }
+
+    /// Shows `popover` under the icon, anchored to `popoverAnchor`. Returns
+    /// whether it was shown — false when the status item isn't on screen — so
+    /// the caller can skip what only makes sense for a visible popover.
+    private func showBelowIcon(_ popover: NSPopover) -> Bool {
+        guard let frame = statusItemFrameOnScreen else { return false }
+        let anchor = popoverAnchor ?? Self.makePopoverAnchor()
+        popoverAnchor = anchor
+        guard let anchorView = anchor.contentView else { return false }
+        anchor.setFrame(frame, display: false)
+        anchor.orderFrontRegardless()
+        popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
+        return true
     }
 
     /// Borderless and fully transparent, and it ignores mouse events, so the
     /// icon beneath still gets the hover tracking and the click.
-    private static func makeHoverAnchor() -> NSWindow {
+    private static func makePopoverAnchor() -> NSWindow {
         let window = NSWindow(contentRect: .zero, styleMask: [.borderless],
                               backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -205,7 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.ignoresMouseEvents = true
         window.level = .statusBar
         // .fullScreenAuxiliary: the menu bar can be revealed over another
-        // app's full-screen space, and the summary has to show there too.
+        // app's full-screen space, and the popovers have to show there too.
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         window.isExcludedFromWindowsMenu = true
         return window
@@ -221,18 +239,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func togglePopover() {
-        guard let button = statusItem.button else { return }
         if popover.isShown {
             popover.performClose(nil)
-        } else {
-            hideHoverSummary() // don't stack the hover summary under the full popover
-            // Freshen openclaw before showing its section in the unified popover.
-            if prefs.showsOpenClaw {
-                openClaw.refreshNow()
-            }
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+            return
         }
+        // The popover is .transient, so a click on the icon while it is open
+        // counts as a click outside it: AppKit has already closed it by the
+        // time this runs, and then the same click arrives here. Opening again
+        // would leave the icon unable to close its own popover. (With the
+        // popover anchored to the button, AppKit swallowed that click itself.)
+        if let click = Self.clickNumber(of: NSApp.currentEvent), click == popoverClosingClick {
+            return
+        }
+        hideHoverSummary() // don't stack the hover summary under the full popover
+        // Freshen openclaw before showing its section in the unified popover.
+        if prefs.showsOpenClaw {
+            openClaw.refreshNow()
+        }
+        guard showBelowIcon(popover) else { return }
+        popover.contentViewController?.view.window?.makeKey()
+    }
+
+    /// Only the click popover has a delegate.
+    func popoverDidClose(_ notification: Notification) {
+        popoverClosingClick = Self.clickNumber(of: NSApp.currentEvent)
+        if !hoverPopover.isShown { popoverAnchor?.orderOut(nil) }
+    }
+
+    /// The number a mouse-down shares with its mouse-up, or nil for any other
+    /// event — `eventNumber` raises on events that aren't mouse events.
+    private static func clickNumber(of event: NSEvent?) -> Int? {
+        guard let event, event.type == .leftMouseDown || event.type == .leftMouseUp else { return nil }
+        return event.eventNumber
     }
 
     /// Also the target of the app's ⌘, command (`MongshellMenubarApp`).
