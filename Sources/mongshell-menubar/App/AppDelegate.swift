@@ -36,7 +36,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover!
     private var hoverPopover: NSPopover!
     /// Closes the hover summary if the cursor is no longer over the icon — see
-    /// `showHoverSummary`. Non-nil only while the summary is shown.
+    /// `showHoverSummary`. Set while the summary is shown; if something other
+    /// than `hideHoverSummary` closes the summary, it clears itself on its
+    /// next tick.
     private var hoverWatchdog: Timer?
     /// How often the watchdog looks. A missed mouseExited is rare, so this only
     /// bounds how long a stray summary can stay up.
@@ -96,9 +98,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // outside it and swallows that click, so the first click on the icon
         // only closed the summary and `togglePopover` never ran — the full
         // popover took a second click. With .applicationDefined the click
-        // reaches the button, and we close the summary ourselves; the watchdog
-        // in `showHoverSummary` covers a missed mouseExited, which .transient
-        // used to cover.
+        // reaches the button, and we close the summary ourselves.
+        //
+        // What changes: the summary now stays for as long as the cursor is over
+        // the icon, app switches included (.transient closed it on those). The
+        // watchdog in `showHoverSummary` only cleans up the case where the
+        // cursor has left but mouseExited never arrived.
         hoverPopover = NSPopover()
         hoverPopover.behavior = .applicationDefined
         hoverPopover.animates = false
@@ -150,13 +155,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // missed, nothing else would close an .applicationDefined popover, so
         // check the cursor position while the summary is up.
         hoverWatchdog?.invalidate()
-        hoverWatchdog = Timer.scheduledTimer(withTimeInterval: Self.hoverWatchdogInterval,
-                                             repeats: true) { [weak self] _ in
+        let watchdog = Timer(timeInterval: Self.hoverWatchdogInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, !self.isCursorOverStatusItem else { return }
-                self.hideHoverSummary()
+                guard let self else { return }
+                if !self.hoverPopover.isShown || !self.isCursorOverStatusItem {
+                    self.hideHoverSummary()
+                }
             }
         }
+        // .common: keep checking while the run loop is in an event-tracking
+        // mode (a drag in the settings window), not only in .default.
+        RunLoop.main.add(watchdog, forMode: .common)
+        hoverWatchdog = watchdog
     }
 
     private func hideHoverSummary() {
