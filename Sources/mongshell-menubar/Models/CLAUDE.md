@@ -18,7 +18,7 @@ non_goals:
 | 종류 | 예 | 규칙 |
 |---|---|---|
 | 상태 소유 객체 | `UsageModel`, `OpenClawModel`, `ClaudeSettingsModel`, `Preferences` | `@MainActor final class … : ObservableObject` |
-| 값 타입 | `UsageSnapshot`, `ModelUsage`, `OpenClawHealth` | `struct`/`enum`, `Equatable`, 로직 없음에 가깝게. 단 판정 규칙을 테스트 가능하게 담는 순수 값 타입은 허용 (`OpenClawReading` — 두절 판정, `OpenClawHealWatch` — 복구 알림 판정) |
+| 값 타입 | `UsageSnapshot`, `ModelUsage`, `OpenClawHealth`, `ServerHost` / `ServerHostPower` / `ServerHostDisk` / `ServerHostLevel`, `ServerHostHealth` | `struct`/`enum`, `Equatable`, 로직 없음에 가깝게. 단 판정 규칙을 테스트 가능하게 담는 순수 값 타입은 허용 (`OpenClawReading` — 두절 판정, `OpenClawHealWatch` — 복구 알림 판정, `ServerHostAlertWatch` — 서버 호스트 알림 판정) |
 
 ## `@MainActor` 격리
 
@@ -52,7 +52,27 @@ non_goals:
 
 "전제가 없음" 을 별도 케이스로 둔다 — `OpenClawHealth.notConfigured` 처럼. `nil` 이나 `down` 으로 뭉뚱그리면 "완전히 감춘다" 와 "빨간 점을 띄운다" 를 구분할 수 없다 (PHILOSOPHY 원칙 2 / Decision #25). 같은 이유로 "상대에게 닿지 않음"(`.unreachable`, 회색)과 "상대가 고장을 보고함"(`.down`, 빨강)도 한 케이스로 합치지 않는다.
 
+`ServerHostHealth` 도 같은 구분을 따른다 (Decision #31).
+
+- `.absent` — 그릴 것이 없다. 상태 URL 이 없거나, 성공 응답이 아직 없거나, 서버가 `host` 를 보내지 않는다. 회색 점으로 대신하지 않는다.
+- `.reported(ServerHost)` — 신선한 문서의 판정.
+- `.unreachable(last:)` — `host` 를 받은 적이 있지만 문서가 오래됐다. 마지막 값을 들고 있어 뷰가 흐리게 남길 수 있다. 마지막 성공에 `host` 가 없었으면 `.unreachable` 이 아니라 `.absent` 다.
+
+신선도 판정은 `OpenClawReading` 한 곳에 있고 (`health(now:)` 와 `hostHealth(now:)` 가 같은 규칙을 쓴다), 두 상태는 서로의 값에 영향을 주지 않는다.
+
+**앱은 서버 호스트의 임계값을 갖지 않는다.** 레벨은 서버 에이전트가 판정해 보낸 것이고(`HostRules`), 모델 쪽 타입은 그것을 담아 표시 문구로 바꿀 뿐이다. 수치로 레벨을 다시 계산하는 코드를 넣지 않는다.
+
+**전원의 원인 문구는 `pluggedIn == false` 일 때만 쓴다** (`ServerHostPower.isOnBattery`). 전원 레벨은 앱이 판정을 읽지 못해 `warning` 으로 접은 것일 수도 있어, 레벨만 보고 "어댑터 분리"·"배터리 부족" 이라고 하면 같은 화면의 "충전 중" 과 모순된다. 그 밖에는 레벨만 말한다 ("전원 주의"·"전원 위험"). 상태어와 알림 문구 모두 같다.
+
 ## 알림·백오프
 
 - 임계 알림은 **레벨이 올라갈 때 한 번만** 보낸다 (`lastNotifiedLevel`). 폴링마다 재발송하지 않는다.
+- 서버 호스트 알림(`ServerHostAlertWatch`, Decision #31)은 **신호별**(전원·디스크 따로)로 같은 원칙을 따른다.
+  - 첫 관측(앱 시작·상태 URL 변경 뒤)은 기준점이며 알리지 않는다. 기준점에 없던 신호가 나중에 처음 나타나면 ok 와 비교한다.
+  - 레벨이 직전보다 오르면 알린다. 유지·회복·두절·신호가 사라진 것은 알리지 않는다.
+  - 이미 알린 레벨 이하로 다시 오르는 것은 마지막 알림 후 `repeatCooldown`(3600초) 동안 알리지 않는다 — 에이전트 판정에 히스테리시스가 없어 임계 근처에서 출렁이기 때문. 더 높은 레벨로의 상승은 쿨다운과 무관하게 즉시 알린다.
+  - **쿨다운에 눌린 상승은 버리지 않고 미룬다.** 쿨다운이 끝난 뒤 첫 관측에서 신호가 여전히 ok 보다 나쁘면 그때의 레벨로 한 번 알리고, 그 사이 ok 로 회복했으면 알리지 않는다. 쿨다운은 출렁임을 막는 장치이지 상태를 숨기는 장치가 아니다.
+  - 쿨다운은 이 맥의 시계로 잰다. 경과 시간이 음수(시계가 되돌려짐)이면 끝난 것으로 본다.
+  - 감시에는 방금 받은 응답이 아니라 `reading.lastSuccess?.host` 를 넘긴다 — `OpenClawReading` 이 버린 늦은 도착 응답이 알림 판정에 섞이지 않게.
+  - 알림 발송 여부는 복구 알림과 같은 문(`canNotifyAboutServer` — `notificationsAvailable`, `Preferences.showsOpenClaw`)을 지난다. **문이 닫혀 있으면 그 사실을 감시에 넘긴다** (`observe(_:now:canNotify:)`). `canNotify: false` 로 불린 감시는 그 관측을 비교에 쓰지 않고 알던 것(기준점·쿨다운·미뤄 둔 알림)을 버려, 그 뒤 문이 열린 상태의 첫 관측이 기준점이 된다. 보여주지 못한 알림을 "알렸다" 고 기록하게 두면 다음 상승이 쿨다운에 눌린다. 초기화는 `observe` 가 불릴 때, 곧 성공 응답이 도착할 때에만 일어난다 — 문을 닫았다가 다음 성공 응답 전에 다시 열면 기준점·쿨다운이 그대로 남는다.
 - 429 백오프는 지수이며 상한이 있다. 백오프 상태를 폴링 주기 설정과 섞지 않는다 — 사용자 설정은 하한(`Config.minPollInterval`)과 함께 base 를 정할 뿐이다.

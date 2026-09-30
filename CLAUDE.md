@@ -11,7 +11,7 @@ non_goals:
 
 # mongshell-menubar
 
-macOS 메뉴바에 Claude 구독 사용량을 상시 표시하는 1인용 네이티브 앱. SwiftPM executable 타깃 2개(메뉴바 앱 + 서버 맥용 openclaw 감시 에이전트 — `server/README.md`), 외부 의존성 없음. 개발 하네스 = **mongshell-dev 플러그인** (스킬 `/mongshell-dev:qa` 등 네임스페이스 호출 — 흐름도·라우팅은 플러그인 동봉 README 가 권위).
+macOS 메뉴바에 Claude 구독 사용량을 상시 표시하는 1인용 네이티브 앱. SwiftPM executable 타깃 2개(메뉴바 앱 + 서버 맥용 감시 에이전트: openclaw 게이트웨이와 서버 호스트 신호(전원·디스크)를 판정해 싣는다 — `server/README.md`), 외부 의존성 없음. 개발 하네스 = **mongshell-dev 플러그인** (스킬 `/mongshell-dev:qa` 등 네임스페이스 호출 — 흐름도·라우팅은 플러그인 동봉 README 가 권위).
 
 ## 작업 규약 코어 (하네스 상시 규칙)
 <!-- harness-core: 2026-07 -->
@@ -44,7 +44,7 @@ macOS 메뉴바에 Claude 구독 사용량을 상시 표시하는 1인용 네이
 - **`swift run` 으로 바이너리를 직접 실행하면 크래시한다** — UserNotifications 가 앱 번들을 요구한다. 항상 `./scripts/make_app.sh` 로 `.app` 을 만들어 실행.
 - **뷰에서 `@State` 를 쓰지 않는다.** macOS 27 SDK 부터 `@State` 는 SwiftUIMacros 플러그인이 전개하는 매크로인데, 그 플러그인은 Xcode 에만 있고 Command Line Tools 에는 없다. 로컬 뷰 상태는 `State<Value>` 저장 프로퍼티를 손으로 펼쳐 쓴다 ([MenuBarIconView.swift](Sources/mongshell-menubar/Views/MenuBarIconView.swift) 참조, Decision #11-2).
 - **별도 lint 도구가 없다.** `swift build` 의 경고가 그 역할이며, 경고 0 을 유지한다.
-- **App Sandbox 미사용.** Keychain 의 Claude Code 자격증명 항목(다른 앱의 항목) 접근이 샌드박스와 양립하지 않는다. openclaw 는 HTTPS 로 상태 URL 을 읽을 뿐 셸아웃하지 않는다 (Decision #25).
+- **App Sandbox 미사용.** Keychain 의 Claude Code 자격증명 항목(다른 앱의 항목) 접근이 샌드박스와 양립하지 않는다. openclaw·서버 호스트 상태는 HTTPS 로 상태 URL 을 읽을 뿐 셸아웃하지 않는다 (Decision #25 / #31).
 - **비공식 엔드포인트에 의존한다** — 스키마·헤더가 예고 없이 바뀔 수 있다는 전제로 디코딩이 의도적으로 관대하다 (Decision 2).
 
 ## Sub-Documents

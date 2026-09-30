@@ -19,7 +19,7 @@
 [openclaw](https://openclaw.ai) 게이트웨이가 도는 **서버 맥**에 감시 에이전트를 설치하면
 ([server/README.md](server/README.md)), 에이전트가 판정·자동복구를 하고 결과를 공개 HTTPS
 주소(`https://<서버>.ts.net:8443/<토큰>`)로 내놓습니다. 설정의 **openclaw** 섹션에 그 주소를
-붙여넣고 **`Claude + openclaw`** 를 고르면 게이트웨이·채널 건강 상태가 **같은 메뉴바
+붙여넣고 **`Claude + 서버`** 를 고르면 게이트웨이·채널 건강 상태가 **같은 메뉴바
 아이템에 통합**됩니다 — 사용률 오른쪽에 발자국 + 신호등(🟢 정상 / 🟡 채널 이상 / 🔴
 게이트웨이 다운 / ⚪️ 서버 연락 두절)이 붙고, 팝오버 아래에 상태·채널·서버 확인 시각이
 표시됩니다. 회색은 서버 소식이 끊겼다는 뜻일 뿐 게이트웨이 고장이 아닙니다(맥북이
@@ -27,11 +27,19 @@
 알려줍니다. **URL 이 없거나 `Claude만`을 고르면 이 요소는 메뉴바·팝오버 어디에도 나타나지
 않고 기존과 100% 동일하게 동작합니다.**
 
+에이전트는 **서버 맥 자체의 신호(전원·디스크 여유)** 도 함께 판정해 보냅니다. 서버가 이
+신호를 보내면 발자국 + 점 아래에 서버 글리프 + 점(🟢 정상 / 🟡 주의 / 🔴 위험 / ⚪️ 서버
+연락 두절)이 한 줄 더 쌓이고 — 메뉴바 폭은 늘지 않습니다 — 팝오버에 배터리·디스크 여유를
+보여주는 서버 섹션이 생깁니다. 어댑터가 빠지거나 디스크가 차서 상태가 나빠지면 알림으로
+알려줍니다. 따로 켜는 설정은 없고, 서버가 보내지 않는 신호(구버전 에이전트, 배터리 없는
+서버의 전원)는 자리 없이 사라집니다. 점 색의 기준은
+[server/README.md](server/README.md#서버-점-전원디스크) 에 있습니다.
+
 **설치 가이드: [server/README.md](server/README.md)** — 서버 맥 준비부터 맥북 연결·운영·문제 해결까지
 따라 하는 런북입니다. 요약하면:
 1. 서버 맥에 brew 판 Tailscale 을 준비하고 `server/install.sh` 실행 (Tailscale 은 서버 맥에만)
 2. 마지막에 출력되는 상태 URL(`https://…:8443/<토큰>`)을 비밀번호 관리자 등에 보관
-3. 각 맥북의 메뉴바 앱 **설정 → openclaw** 에 붙여넣고 `Claude + openclaw` 선택
+3. 각 맥북의 메뉴바 앱 **설정 → 서버** 에 붙여넣고 `Claude + 서버` 선택
 
 ## Claude Code 설정 (선택 기능 — `~/.claude` 가 있을 때만 활성화)
 설정창의 **Claude Code** 섹션에서 `~/.claude/settings.json` 을 직접 편집합니다 — 기본 모델,
@@ -137,16 +145,20 @@ Sources/mongshell-menubar/
   App/SnapshotRenderer.swift 오프스크린 PNG QA 렌더러(MONGSHELL_SNAPSHOT)
   Views/ClaudeMarkView.swift Claude 스타버스트 마크 Canvas 렌더러
   Views/MenuBarIconView.swift 상태바 마크 + 5h/7d 링 게이지(+5h 초기화 시각),
-                            openclaw 신호등, 다크/라이트 적응, ≥90% 맥동
+                            openclaw 신호등(+ 그 아래 서버 호스트 신호등),
+                            다크/라이트 적응, ≥90% 맥동
   Views/HoverSummaryView.swift hover 즉시 요약(5h/7d · 초기화 3열 Grid)
-  Views/PopoverView.swift   라이트 팝오버 308px(5시간/주간/모델별 + openclaw 섹션)
+  Views/PopoverView.swift   라이트 팝오버 308px(5시간/주간/모델별 + openclaw 섹션
+                            + 서버 섹션)
   Views/SettingsView.swift  일반(자동 실행)·색상·폴링·알림·Claude Code·openclaw·계정
   Views/ClaudeSettingsSection.swift  settings.json 편집 섹션(한글 설명 캡션)
   Views/OpenClawSettingsSection.swift openclaw 상태 URL 입력·상태·확인 간격 섹션
   Design/Palette.swift      색 토큰 SSOT(사용량 3단계·팝오버 표면/텍스트)
   Models/…                  Preferences, UsageState, UsageModel(폴링/알림),
                             OpenClawHealth, OpenClawStatus(두절 판정·복구 알림 판정),
-                            OpenClawModel(상태 URL 폴링/복구 알림),
+                            ServerHost(서버 호스트 신호 값 타입·표시 문구),
+                            ServerHostAlertWatch(전원·디스크 알림 판정),
+                            OpenClawModel(상태 URL 폴링/복구·서버 호스트 알림),
                             ClaudeSettingsModel(settings.json ↔ 구조체),
                             LoginItemModel(로그인 항목 상태 캐시/안내)
   Services/…                Config, Credentials(Keychain), UsageAPIClient, AuthService(PKCE),
@@ -154,6 +166,13 @@ Sources/mongshell-menubar/
                             TimeText, OpenClawStatusClient(상태 URL HTTPS 읽기/관대한 디코딩),
                             ClaudeSettingsStore(settings.json 입출력/파일 감시),
                             LoginItemService(SMAppService 로그인 항목 등록)
+
+Sources/mongshell-openclaw-agent/     서버 맥용 에이전트 (server/README.md)
+  main.swift                옵션 파싱 + probe → 복구 → 호스트 판정 → 상태 파일 쓰기 루프
+  Probe.swift               `openclaw channels status --probe` 실행·판정
+  Heal.swift                자동복구 시점 판정, 게이트웨이 레이블 탐색·kickstart
+  HostProbe.swift           전원(IOKit)·디스크 여유 읽기 + 호스트 판정 규칙(HostRules)
+  StatusFile.swift          공개 상태 JSON 인코딩·원자적 쓰기
 ```
 
 ## 데이터 소스 & 인증

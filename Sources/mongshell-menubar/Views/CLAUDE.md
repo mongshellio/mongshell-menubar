@@ -41,18 +41,29 @@ private var pulsing: Bool {
 
 | 표면 | 뷰 | 제약 |
 |---|---|---|
-| 메뉴바 | `MenuBarIconView`, `ClaudeMarkView` | 폭이 유한하다. 상시 표시 항목 추가는 무엇을 뺄지 함께 제시해야 한다 |
+| 메뉴바 | `MenuBarIconView`, `ClaudeMarkView` | 폭이 유한하다. 상시 표시 항목 추가는 무엇을 뺄지 함께 제시해야 한다. 신호등은 세로로 **두 줄까지** 쌓는다 (Decision #31) |
 | hover 요약 | `HoverSummaryView` | 즉시 표시가 존재 이유다 — 지연을 만드는 애니메이션·비동기 로드 금지 |
 | 클릭 팝오버 / 설정창 | `PopoverView`, `SettingsView`, `ClaudeSettingsSection`, `OpenClawSettingsSection` | 정확한 숫자와 상세는 여기로 미룬다 |
 
-메뉴바에 무언가를 더하려는 변경은 [docs/PHILOSOPHY.md](../../../docs/PHILOSOPHY.md) § Design Principles 1 을 먼저 통과해야 한다.
+메뉴바에 무언가를 더하려는 변경은 [docs/PHILOSOPHY.md](../../../docs/PHILOSOPHY.md) § Design Principles 1 을 먼저 통과해야 한다. Claude 사용량 외의 신호라면 같은 문서의 § Admission Criteria 도 통과해야 한다 — 기준 4 에 따라, 메뉴바 폭을 늘리지 않고 들어갈 자리가 없으면 원칙 1 의 "무엇을 뺄지" 가 그대로 적용된다.
+
+### 메뉴바 두 줄 스택
+
+서버가 호스트 신호를 보내면 단일 openclaw 표시(발자국 + 점) 자리에 **두 줄 스택**이 들어간다 — 위는 발자국 + openclaw 점, 아래는 서버 글리프 + 서버 점 (Decision #31).
+
+- **두 줄이 상한이다** (Decision #31 이 정한 예산). 두 줄과 그 사이 간격(9 + 1 + 9 = 19pt)이 22pt 메뉴바에 들어가야 한다. 세 번째 줄을 넣지 않는다.
+- 스택은 그것이 대신하는 단일 표시보다 넓으면 안 된다 — PHILOSOPHY § Admission Criteria 4 가 말하는 것은 이것(메뉴바 폭을 늘리지 않는다)이고, 세로 스택과 두 줄 상한은 그 기준을 만족시키려고 Decision #31 이 고른 수단이다.
+- 치수는 `MenuBarIconView.swift` 의 `StackedIndicator` 가 권위다. 글리프 열 폭을 고정해 두 점이 세로로 정렬된다.
+- 서버 점은 openclaw 표시 옆에만 그린다 — openclaw 점 없이 서버 점만 그리는 경로는 없다.
+- 단일 표시와 스택은 폭이 달라, 서버 점이 생기거나 사라지면 `AppDelegate` 가 status item 크기를 다시 잡는다.
 
 ## 디자인 토큰
 
 - **색은 `Design/Palette.swift` 가 단일 권위다.** 뷰에 `Color(hex:)`·`.red`·`.orange` 를 직접 적지 않는다. 새 색이 필요하면 `Palette` 에 이름을 붙여 추가한다.
 - 사용량 3단계(초록 <50 · 주황 <80 · 빨강 ≥80) 판정도 `Palette` 의 로직을 쓴다. 뷰마다 임계값을 다시 적으면 색상 코딩이 갈린다.
 - 시간 표기는 `Services/TimeText.swift` 가 권위다. 메뉴바용 압축 포맷(`clockShort`, `weekdayClockShort`)과 팝오버용 서술 문구를 섞지 않는다.
-- 색상 코딩이 꺼진 경우(`Preferences.colorCoding == false`)의 모노크롬 폴백을 항상 함께 처리한다.
+- 사용량 게이지·수치처럼 사용량 3단계 색을 쓰는 요소는 색상 코딩이 꺼진 경우(`Preferences.colorCoding == false`)의 모노크롬 폴백을 항상 함께 처리한다.
+- **신호등 점(openclaw·서버 호스트)은 `colorCoding` 의 대상이 아니다.** 그 토글은 사용량 3단계 색상의 것이고, 신호등은 색이 곧 정보라 모노크롬 폴백이 없다. 점 색은 `OpenClawHealth.dotColor` / `ServerHostHealth.dotColor` 에서 받는다 — 뷰에서 레벨을 색으로 다시 매핑하지 않는다.
 
 ## 표시 모드
 
@@ -70,4 +81,8 @@ UI 를 추가·변경하면 `App/SnapshotRenderer.swift` 의 렌더 목록에 �
 
 ## 선택 기능의 비가시성
 
-openclaw·Claude Code 설정처럼 전제가 없을 수 있는 요소는 **비활성 회색 표시(기능 꺼짐의 의미)가 아니라 아예 렌더하지 않는다** (PHILOSOPHY 원칙 2 / Decision #25). `if` 로 분기하되 자리(spacer·구분선)를 남기지 않는다. 설정 진입점 예외는 PHILOSOPHY 원칙 2 를 따른다 — 현재 해당하는 것은 `OpenClawSettingsSection` 의 상태 URL 입력칸뿐이다.
+openclaw·Claude Code 설정처럼 전제가 없을 수 있는 요소는 **비활성 회색 표시(기능 꺼짐의 의미)가 아니라 아예 렌더하지 않는다** (PHILOSOPHY 원칙 2 / Decision #25). `if` 로 분기하되 자리(spacer·구분선)를 남기지 않는다.
+
+서버 호스트 요소도 같다 (Decision #31). `ServerHostHealth.absent` 면 메뉴바의 서버 줄과 팝오버의 서버 섹션(구분선 포함)을 그리지 않고, 서버가 보내지 않은 신호의 줄(배터리 없는 서버의 전원 줄)은 빈 줄 없이 빠진다. 연락 두절은 "없음" 이 아니다 — 마지막 값을 흐리게 남기고, 어느 줄도 원인으로 강조하지 않는다.
+
+설정 진입점 예외는 PHILOSOPHY 원칙 2 를 따른다 — 현재 해당하는 것은 `OpenClawSettingsSection` 의 상태 URL 입력칸뿐이다.

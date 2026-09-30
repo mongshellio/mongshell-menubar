@@ -46,11 +46,13 @@ Swift 는 컴파일이 곧 타입 검사라 별도 typecheck 명령이 없다. *
 
 - 테스트는 소스 옆(co-located)이 아니라 **`Tests/<대상>Tests/main.swift`** 에 둔다. `swiftc` 로 직접 컴파일하는 실행 파일이라 `@main` 없는 top-level 코드가 진입점이고, 소스 트리에 섞이면 `swift build` 가 앱 타깃에 함께 넣어버린다.
 - 새 테스트 대상을 추가하면 `scripts/test.sh` 의 `swiftc` 인자에 **그 대상이 의존하는 소스 파일을 직접 나열**해야 한다. 자동 탐색이 없다.
-- 현재 커버리지는 세 묶음이다.
+- 현재 커버리지는 네 묶음이다.
   - `Tests/ClaudeSettingsTests` — `ClaudeSettingsStore` / `ClaudeSettingsModel`. 불변식: **보이지 않는 설정을 앱이 파괴하지 않는다.**
-  - `Tests/OpenClawAgentTests` — 서버 에이전트의 `Probe` / `Heal` / `StatusFile` (`main.swift` 는 진입점이라 제외). 불변식: **판정 규칙·복구 시점·자기 레이블 제외·공개 JSON 형식과 detail 필터가 조용히 바뀌지 않는다.**
-  - `Tests/OpenClawClientTests` — 앱의 `OpenClawStatusClient` / `OpenClawStatus` / `OpenClawHealth` / `TimeText`. 에이전트의 `Probe.swift`·`StatusFile.swift` 를 함께 컴파일해 에이전트 인코더 → 앱 파서 왕복을 검증한다. 불변식: **두 타깃의 JSON 키가 어긋나지 않고, 연락 두절(회색)과 게이트웨이 다운(빨강)이 섞이지 않으며, 서버 복구 알림은 새 복구에만 뜨며, 원격 문자열과 응답 크기는 상한 안에서만 받는다.**
-- 서버 스크립트(`server/*.sh`)는 tailscale 실기가 필요해 자동 테스트가 없다. `bash -n` 문법 검사와, 서버 맥에서의 설치 후 [server/README.md](../server/README.md) § 동작 확인이 검증 경로다.
+  - `Tests/OpenClawAgentTests` (실행 파일 `agent-tests`) — 서버 에이전트의 `Probe` / `Heal` / `HostProbe` / `StatusFile` (`main.swift` 는 진입점이라 제외). 불변식: **판정 규칙·복구 시점·자기 레이블 제외·공개 JSON 형식과 detail 필터가 조용히 바뀌지 않는다. 호스트 판정의 임계 경계(20% · 20GB · 5GB)와 전원·디스크 읽기 해석이 바뀌지 않고(극단값에 트랩하지 않고, 알 수 없는 전원 공급원을 ok 로 읽지 않는다), 호스트 로그의 비교 키는 신호별 레벨이며, `host` 아래 문자열 값은 세 레벨 이름뿐이다.**
+  - `Tests/OpenClawClientTests` (실행 파일 `client-tests`) — 앱의 `OpenClawStatusClient` / `OpenClawStatus` / `OpenClawHealth` / `ServerHost` / `ServerHostAlertWatch` / `TimeText` (`Palette` 는 점 색 때문에 함께 컴파일). 에이전트의 `Probe.swift`·`HostProbe.swift`·`StatusFile.swift` 를 함께 컴파일해 에이전트 인코더 → 앱 파서 왕복을 검증한다. 불변식: **두 타깃의 JSON 키가 어긋나지 않고, 연락 두절(회색)과 게이트웨이 다운(빨강)이 섞이지 않으며, 서버 복구 알림은 새 복구에만 뜨며, 원격 문자열과 응답 크기는 상한 안에서만 받는다. 깨진 `host` 는 서버 점만 잃고 openclaw 판정은 남으며, 읽을 수 없는 레벨(모르는 문자열·문자열이 아닌 값)은 초록이 되지 않고, 전원의 원인 문구는 `pluggedIn: false` 일 때만 나오며, 서버 호스트 알림은 신호별 상승에 뜨고 쿨다운을 지키되 쿨다운에 눌린 상승은 버리지 않고 미루며, 통지 게이트가 닫힌 동안에는 아무것도 알린 것으로 세지 않는다.**
+  - **두 타깃의 타입 이름은 겹치면 안 된다.** `client-tests` 는 앱 소스와 에이전트 소스를 한 모듈로 컴파일하므로, 양쪽에 같은 이름의 타입이 있으면 재선언 오류로 테스트가 컴파일되지 않는다 (`swift build` 는 타깃이 달라 통과한다). 그래서 같은 개념이라도 에이전트는 `HostLevel` / `HostStatus`, 앱은 `ServerHostLevel` / `ServerHost` 다.
+  - `Tests/ServerOptionsTests` (`main.sh` — Swift 가 아니라 bash 라 컴파일 없이 `bash` 로 실행) — 실제 `server/lib.sh` 를 source 해 `server/install.sh` 의 설치 옵션 규칙(`valid_interval` / `load_saved_options` / `resolve_options`)을 검증한다. 불변식: **우선순위는 명령줄 > 저장값 > 기본값(60초 · 자동복구 켬)이고, 깨진 저장값(숫자가 아님 · 15–86400 범위 밖 · 자릿수 초과 · `auto_heal` 이 0/1 이 아님)과 읽을 수 없는 `options` 파일은 경고 후 기본값으로 가되 설치를 중단시키지 않으며, `options` 파일의 내용은 실행되지 않는다.**
+- 서버 스크립트(`server/*.sh`)에서 자동 테스트가 있는 것은 위 설치 옵션 규칙뿐이다. 나머지 — tailscale serve/funnel 설정 조회·경로 해제(`server/lib.sh` 의 `serve_handlers` / `unpublish_path`), `install.sh` / `uninstall.sh` 의 빌드·LaunchAgent 등록·토큰·공개 절차 — 는 tailscale 실기가 필요해 자동 테스트가 없다. `bash -n` 문법 검사와, 서버 맥에서의 설치 후 [server/README.md](../server/README.md) § 동작 확인이 검증 경로다.
 
 ## 로컬 실행
 
@@ -71,6 +73,19 @@ swift build && MONGSHELL_SNAPSHOT=/tmp/mongshell_snaps ./.build/debug/mongshell-
 `MONGSHELL_SNAPSHOT` 이 설정되면 앱이 메뉴바에 붙는 대신 오프스크린으로 PNG 를 렌더하고 종료한다 (`App/SnapshotRenderer.swift`). 이 프로젝트는 웹 UI 가 아니라 `.claude/browser-scenarios.md` 대상이 아니며, **UI 변경의 시각 확인은 이 경로가 담당한다.**
 
 `Form` 기반 화면(설정창)은 `ImageRenderer` 로 빈 이미지가 나와 오프스크린 윈도우 캡처 경로를 쓴다 — 새 설정 UI 를 추가하면 그쪽에 등록한다.
+
+산출물 (`<이름>.png`):
+
+| 파일 | 내용 |
+|---|---|
+| `menubar_strip_dark` / `menubar_strip_light` | 메뉴바 — 사용량 레벨 3쌍 × openclaw 점 (정상 / 두절 / 다운) |
+| `menubar_host_strip_dark` / `menubar_host_strip_light` | 메뉴바 두 줄 스택 — 서버 점 없음(단일 표시, 비교 기준) → 서버 점 ok / warning / critical / 두절. 실제 메뉴바 두께(22pt)로 잘라 그리므로 넘치는 스택은 잘려 보인다 |
+| `popover` | 팝오버 — openclaw 정상, 서버 섹션 없음 |
+| `popover_host_on_battery` | 팝오버 — 서버 섹션, 어댑터가 빠진 서버 (전원 warning) |
+| `popover_host_disk_critical` | 팝오버 — 서버 섹션, 배터리 없는 서버의 디스크 critical (전원 줄 없음) |
+| `popover_host_unreachable` | 팝오버 — 두절, 서버 섹션에 마지막 값이 흐리게 남음 |
+| `popover_openclaw_unreachable` / `popover_openclaw_down` | 팝오버 — openclaw 두절 / 게이트웨이 다운 |
+| `settings` / `settings_claude` / `settings_openclaw` / `settings_openclaw_down` | 설정창 |
 
 ## Claude Code 설정 편집 테스트
 
