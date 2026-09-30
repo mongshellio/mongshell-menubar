@@ -18,7 +18,7 @@
 ## openclaw 게이트웨이 상태 (선택 기능 — 상태 URL 설정 시에만 활성화)
 [openclaw](https://openclaw.ai) 게이트웨이가 도는 **서버 맥**에 감시 에이전트를 설치하면
 ([server/README.md](server/README.md)), 에이전트가 판정·자동복구를 하고 결과를 공개 HTTPS
-주소(`https://<서버>.ts.net:8443/<토큰>`)로 내놓습니다. 설정의 **openclaw** 섹션에 그 주소를
+주소(`https://<서버>.ts.net:8443/<토큰>`)로 내놓습니다. 설정의 **서버** 섹션에 그 주소를
 붙여넣고 **`Claude + 서버`** 를 고르면 게이트웨이·채널 건강 상태가 **같은 메뉴바
 아이템에 통합**됩니다 — 사용률 오른쪽에 발자국 + 신호등(🟢 정상 / 🟡 채널 이상 / 🔴
 게이트웨이 다운 / ⚪️ 서버 연락 두절)이 붙고, 팝오버 아래에 상태·채널·서버 확인 시각이
@@ -150,7 +150,7 @@ Sources/mongshell-menubar/
   Views/HoverSummaryView.swift hover 즉시 요약(5h/7d · 초기화 3열 Grid)
   Views/PopoverView.swift   라이트 팝오버 308px(5시간/주간/모델별 + openclaw 섹션
                             + 서버 섹션)
-  Views/SettingsView.swift  일반(자동 실행)·색상·폴링·알림·Claude Code·openclaw·계정
+  Views/SettingsView.swift  일반(자동 실행)·색상·폴링·알림·Claude Code·서버·계정
   Views/ClaudeSettingsSection.swift  settings.json 편집 섹션(한글 설명 캡션)
   Views/OpenClawSettingsSection.swift openclaw 상태 URL 입력·상태·확인 간격 섹션
   Design/Palette.swift      색 토큰 SSOT(사용량 3단계·팝오버 표면/텍스트)

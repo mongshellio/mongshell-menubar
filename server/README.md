@@ -277,7 +277,7 @@ tailscale status --json | plutil -extract Self.Tags json -o - -     # → ["tag:
     open mongshell-menubar.app
     ```
   - 서명된 dmg 를 받은 경우: Applications 로 드래그 후 실행 (만드는 법: 루트 README [§ 배포](../README.md#배포-지인에게-서명된-dmg-공유))
-- [ ] 메뉴바 아이콘 클릭 → 팝오버의 **설정…** → **openclaw** 섹션
+- [ ] 메뉴바 아이콘 클릭 → 팝오버의 **설정…** → **서버** 섹션
 - [ ] **상태 URL** 칸에 서버 설치가 출력한 URL 을 붙여넣고 **적용** (또는 Return)
   - `https:// 주소만 사용할 수 있습니다` / `주소 형식이 올바르지 않습니다` 가 뜨면 URL 을 다시 복사한다 (앞뒤 공백은 자동으로 지워진다).
 - [ ] 적용 후 나타나는 **메뉴바 표시** 에서 **`Claude + 서버`** 선택 (기본값은 `Claude만` — 이대로면 메뉴바에 아무것도 안 붙는다)
