@@ -156,7 +156,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func openSettings() {
+    /// Also the target of the app's ⌘, command (`MongshellMenubarApp`).
+    func openSettings() {
         popover.performClose(nil)
         // Re-read the login-item state on every open. The window (and its view
         // hierarchy) is retained across closes, so `.onAppear` would fire only
