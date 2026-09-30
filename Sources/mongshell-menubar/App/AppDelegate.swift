@@ -35,9 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     /// The click popover — a window of our own placed under the icon, not an
     /// NSPopover. A popover anchored to the status item button makes the
-    /// system draw the item as selected for as long as it is up, and only the
-    /// system can anchor one there. So opening, closing and placing it are
-    /// ours to do, the way the Stats app does: see `togglePopover`.
+    /// system draw the item as selected for as long as it is up, and there is
+    /// no API to turn that highlight off. So opening, closing and placing it
+    /// are ours to do, in the same structure the Stats app uses: see
+    /// `togglePopover`.
     private var popoverWindow: NSWindow!
     private var hoverPopover: NSPopover!
     /// Invisible, click-through window laid exactly over the status item while
@@ -233,9 +234,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if prefs.showsOpenClaw {
             openClaw.refreshNow()
         }
-        // The window closes when it stops being key (`windowDidResignKey`) —
-        // that is what a click anywhere else does — and a window is only key
-        // in the active app.
+        // The window closes when it stops being key (`windowDidResignKey`),
+        // and a window is only key in the active app. A click in another
+        // window or app takes key away; a click that doesn't (another menu bar
+        // item, say) leaves it open.
         NSApp.activate(ignoringOtherApps: true)
         popoverWindow.setFrame(Self.popoverFrame(size: size, under: icon), display: true)
         popoverWindow.makeKeyAndOrderFront(nil)
@@ -262,9 +264,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.contentViewController = hosting
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-            window.standardWindowButton(button)?.isHidden = true
-        }
         window.isMovable = false
         window.isReleasedWhenClosed = false
         window.backgroundColor = .clear
