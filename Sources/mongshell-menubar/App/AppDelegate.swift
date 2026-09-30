@@ -40,6 +40,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// are ours to do, in the same structure the Stats app uses: see
     /// `togglePopover`.
     private var popoverWindow: NSWindow!
+    /// When the click popover last closed itself by losing key while the
+    /// cursor was over the icon (system uptime) — see `togglePopover`.
+    private var popoverLostKeyUnderCursorAt: TimeInterval?
+    /// How long after that a click on the icon still counts as the click that
+    /// closed it. Long enough for the press to be released, short enough that
+    /// a separate click is rarely swallowed (Decision #8, follow-up #38).
+    private static let closingClickWindow: TimeInterval = 1
     private var hoverPopover: NSPopover!
     /// Invisible, click-through window laid exactly over the status item while
     /// the hover summary is up; the summary is anchored to it rather than to
@@ -225,7 +232,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func togglePopover() {
         if popoverWindow.isVisible {
             popoverWindow.orderOut(nil)
+            // Closing it here also makes it resign key; that resign isn't an
+            // icon press that already closed it, so it mustn't swallow the
+            // next click.
+            popoverLostKeyUnderCursorAt = nil
             return
+        }
+        // Pressing the icon while the popover is open takes key away from it,
+        // so it has already closed itself (`windowDidResignKey`) by the time
+        // this click's action gets here — seen on a real machine: it closed
+        // and opened again. That click was the close; don't open again.
+        if let lostKeyAt = popoverLostKeyUnderCursorAt {
+            popoverLostKeyUnderCursorAt = nil
+            if ProcessInfo.processInfo.systemUptime - lostKeyAt < Self.closingClickWindow { return }
         }
         guard let icon = statusItemFrameOnScreen,
               let size = popoverWindow.contentViewController?.view.fittingSize else { return }
@@ -245,7 +264,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Only `popoverWindow` has this delegate.
     func windowDidResignKey(_ notification: Notification) {
-        guard (notification.object as? NSWindow) === popoverWindow else { return }
+        guard (notification.object as? NSWindow) === popoverWindow, popoverWindow.isVisible else { return }
+        popoverLostKeyUnderCursorAt = isCursorOverStatusItem ? ProcessInfo.processInfo.systemUptime : nil
         popoverWindow.orderOut(nil)
     }
 
@@ -292,6 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Also the target of the app's ⌘, command (`MongshellMenubarApp`).
     func openSettings() {
         popoverWindow.orderOut(nil)
+        popoverLostKeyUnderCursorAt = nil // same as in `togglePopover`: closed by us
         // Re-read the login-item state on every open. The window (and its view
         // hierarchy) is retained across closes, so `.onAppear` would fire only
         // once — this is the reliable point to catch a change made directly in
