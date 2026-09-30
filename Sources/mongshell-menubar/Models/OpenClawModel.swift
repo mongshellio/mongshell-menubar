@@ -116,24 +116,30 @@ final class OpenClawModel: ObservableObject {
         // — either way its answer is not news about the server we watch now.
         guard !Task.isCancelled, url == Preferences.shared.openClawStatusURLValue else { return }
 
+        let now = Date()
         switch outcome {
         case .success(let status):
             // The host alert watch is left alone when the server clock went
             // back: it compares levels, not server times, and its cooldown
             // runs on this mac's clock.
-            if reading.recordSuccess(status, receivedAt: Date()) { healWatch.resetBaseline() }
+            if reading.recordSuccess(status, receivedAt: now) { healWatch.resetBaseline() }
             if let heal = healWatch.observe(status.lastHeal) { notifyHeal(heal) }
-            // What the reading kept, not what just arrived: a late reply from
-            // an overlapping poll is dropped there, and an old level passing
-            // through the watch would make the current one look like a rise.
-            hostAlertWatch
-                .observe(reading.lastSuccess?.host, now: Date(), canNotify: canNotifyAboutServer)
-                .forEach(notifyHostAlert)
         case .failure(let error):
             reading.recordFailure(error)
         }
-        health = reading.health(now: Date())
-        hostHealth = reading.hostHealth(now: Date())
+        health = reading.health(now: now)
+        hostHealth = reading.hostHealth(now: now)
+        // The watch sees what the reading kept — a late reply from an
+        // overlapping poll is dropped there — and only while it is fresh: a
+        // request can succeed on a document the agent stopped writing, and
+        // its stale figures must not feed an alert (`reportedHost`). Only a
+        // success reaches the watch, so a closed gate resets it exactly when
+        // a document arrives while it can't be shown.
+        if case .success = outcome {
+            hostAlertWatch
+                .observe(hostHealth.reportedHost, now: now, canNotify: canNotifyAboutServer)
+                .forEach(notifyHostAlert)
+        }
     }
 
     // MARK: Notifications

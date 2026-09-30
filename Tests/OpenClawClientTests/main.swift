@@ -691,6 +691,28 @@ do {
           levels(eased.observe(host(power: .warning, disk: .ok), now: at(firstAlertAt + cooldown)))
               == ["power:warning"])
 
+    // The model feeds the watch `hostHealth.reportedHost`: a stale document
+    // (the funnel keeps serving the last file after the agent stops) must not
+    // carry an owed alert out while the popover says the server is
+    // unreachable. It goes out once the document is fresh again.
+    let onBattery = host(power: .warning, disk: .ok)
+    let expiry = at(firstAlertAt + cooldown)
+    let staleDocument = reading(checkedSecondsAgo: 600, now: expiry, host: onBattery)
+    let freshDocument = reading(checkedSecondsAgo: 0, now: at(firstAlertAt + cooldown + 60),
+                                host: onBattery)
+    check("두절 문서의 host 는 감시 입력이 아님 (reportedHost == nil)",
+          staleDocument.hostHealth(now: expiry).reportedHost == nil
+              && staleDocument.hostHealth(now: expiry) == .unreachable(last: onBattery))
+    check("신선한 문서의 host 만 감시 입력",
+          freshDocument.hostHealth(now: at(firstAlertAt + cooldown + 60)).reportedHost == onBattery
+              && OpenClawReading().hostHealth(now: expiry).reportedHost == nil)
+    var stale = suppressedRise()
+    check("지연: 두절 중 쿨다운 만료 — 낡은 값으로 알리지 않음",
+          stale.observe(staleDocument.hostHealth(now: expiry).reportedHost, now: expiry).isEmpty)
+    check("지연: 다시 신선해진 첫 관측(같은 레벨) — 그때 미뤄 둔 알림",
+          levels(stale.observe(freshDocument.hostHealth(now: at(firstAlertAt + cooldown + 60)).reportedHost,
+                               now: at(firstAlertAt + cooldown + 60))) == ["power:warning"])
+
     var rewound = ServerHostAlertWatch()
     _ = rewound.observe(host(power: .ok, disk: .ok), now: at(2 * cooldown))
     _ = rewound.observe(host(power: .warning, disk: .ok), now: at(2 * cooldown + 60))

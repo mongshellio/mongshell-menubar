@@ -68,6 +68,16 @@ extension ServerHostHealth {
         }
     }
 
+    /// The host of a fresh document only — what the alert watch is fed. A
+    /// stale document's figures are for display, not for judging: requests
+    /// keep succeeding after the agent stops (the funnel serves the last file),
+    /// and an alert put off by the cooldown would otherwise go out on those
+    /// old figures while the popover says the server is unreachable.
+    var reportedHost: ServerHost? {
+        if case .reported(let host) = self { return host }
+        return nil
+    }
+
     /// Menu-bar dot color; nil when there is nothing to render.
     var dotColor: Color? {
         switch self {
