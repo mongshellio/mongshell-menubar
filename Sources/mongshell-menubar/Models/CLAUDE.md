@@ -63,7 +63,7 @@ non_goals:
 - 임계 알림은 **레벨이 올라갈 때 한 번만** 보낸다 (`lastNotifiedLevel`). 폴링마다 재발송하지 않는다.
 - 서버 호스트 알림(Decision #31)은 **신호별**(전원·디스크 따로)로 같은 원칙을 따른다. 규칙(기준점·상승 시 알림·쿨다운·미뤄 둔 알림·게이트)은 [docs/architecture.md § 3. openclaw 상태](../../../docs/architecture.md#3-openclaw-상태-선택-경로) 의 서버 호스트 신호 절이 권위이고, 여기서 지킬 규약은 넷이다.
   - 판정은 순수 값 타입 `ServerHostAlertWatch` 에 둔다. 모델은 결과를 받아 보내기만 한다.
-  - 감시에는 **신선한 문서의 `host` 만** 넘긴다 — `hostHealth.reportedHost` (두절·부재는 `nil`). `reading.lastSuccess?.host` 를 넘기면 에이전트가 멈춘 뒤에도 요청은 성공하므로 낡은 값이 감시에 계속 들어간다.
+  - 감시에는 **신선한 문서의 `host` 만** 넘긴다 — `hostHealth.reportedHost` (두절·부재는 `nil`; 배경: Decision #31).
   - 알림 발송 여부는 복구 알림과 같은 문(`canNotifyAboutServer`)을 지나고, **문이 닫혀 있으면 그 사실을 감시에 넘긴다** (`observe(_:now:canNotify: false)`) — 감시가 그 관측으로 초기화된다.
   - `observe` 는 성공 응답이 도착할 때만 부른다. 실패 응답에서 부르면 게이트 초기화 시점이 사양과 달라진다.
 - 429 백오프는 지수이며 상한이 있다. 백오프 상태를 폴링 주기 설정과 섞지 않는다 — 사용자 설정은 하한(`Config.minPollInterval`)과 함께 base 를 정할 뿐이다.
