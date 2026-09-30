@@ -54,12 +54,12 @@ final class Preferences: ObservableObject {
 /// What the menu bar shows. openclaw는 상태 URL 이 설정돼 있을 때만 의미가 있다.
 enum MenuBarTarget: String, CaseIterable {
     case claudeOnly            // "Claude만"
-    case claudeAndOpenClaw     // "Claude + openclaw"
+    case claudeAndOpenClaw     // "Claude + 서버" (rawValue 는 저장 호환을 위해 유지)
 
     var displayName: String {
         switch self {
         case .claudeOnly:       return "Claude만"
-        case .claudeAndOpenClaw: return "Claude + openclaw"
+        case .claudeAndOpenClaw: return "Claude + 서버"
         }
     }
 }

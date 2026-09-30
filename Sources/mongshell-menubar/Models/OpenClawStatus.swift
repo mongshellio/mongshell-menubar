@@ -1,8 +1,9 @@
 import Foundation
 
 /// One successfully read status document from the server agent
-/// (`mongshell-openclaw-agent`, schema 1). Only what the client uses is kept;
-/// anything the agent adds later is ignored by the parser.
+/// (`mongshell-openclaw-agent`, schema 1): the openclaw verdict and, since
+/// Decision #31, the server host's own signals. Only what the client uses is
+/// kept; anything the agent adds later is ignored by the parser.
 struct OpenClawStatus: Equatable, Sendable {
     /// When the agent last probed, on the *server's* clock — see
     /// `OpenClawReading.lastCheckedAt` for the value freshness is judged on.
@@ -14,6 +15,9 @@ struct OpenClawStatus: Equatable, Sendable {
     /// Whether the agent auto-heals. nil = absent (shown as unknown).
     let autoHeal: Bool?
     let lastHeal: OpenClawHealEvent?
+    /// The server host's power and disk verdicts. nil = the agent sent none
+    /// (an older agent, or no signal could be read).
+    let host: ServerHost?
 }
 
 /// The agent's most recent hard-restart attempt.
@@ -26,9 +30,11 @@ struct OpenClawHealEvent: Equatable, Sendable {
 
 /// What the client knows about the server across polls, and the one rule that
 /// turns that into a health: *is the last successful response still fresh?*
+/// Both dots — openclaw and the server host — come out of the same document,
+/// so they share that rule.
 ///
 /// Freshness is judged solely on the last success's `checkedAt` (Decision #25).
-/// A single failed request therefore doesn't flip the dot — as long as the last
+/// A single failed request therefore doesn't flip a dot — as long as the last
 /// good answer is recent, it stands. Kept a pure value type so the rule is
 /// testable without the model's polling and notifications.
 struct OpenClawReading: Equatable, Sendable {
@@ -92,18 +98,33 @@ struct OpenClawReading: Equatable, Sendable {
         return max(minimumStaleAfter, staleIntervalMultiple * Double(interval))
     }
 
+    /// The last success, for as long as it's still fresh.
+    private func freshSuccess(now: Date) -> OpenClawStatus? {
+        guard let success = lastSuccess, let checkedAt = lastCheckedAt else { return nil }
+        let age = now.timeIntervalSince(checkedAt)
+        return age <= Self.staleAfter(intervalSeconds: success.intervalSeconds) ? success : nil
+    }
+
     func health(now: Date) -> OpenClawHealth {
-        if let success = lastSuccess, let checkedAt = lastCheckedAt {
-            let age = now.timeIntervalSince(checkedAt)
-            if age <= Self.staleAfter(intervalSeconds: success.intervalSeconds) {
-                return success.health
-            }
+        if let fresh = freshSuccess(now: now) { return fresh.health }
+        if lastSuccess != nil {
             // Requests may still succeed while the agent has stopped writing —
             // then there's no failure reason, but the answer is still stale.
             return .unreachable(detail: lastFailure ?? "서버 에이전트가 갱신을 멈췄습니다")
         }
         if let lastFailure { return .unreachable(detail: lastFailure) }
         return .unknown
+    }
+
+    /// The host dot, judged on the same freshness as `health(now:)` but
+    /// otherwise independent of it: a down gateway on a healthy server is red
+    /// above green. A stale document keeps the last figures for display —
+    /// unless it never carried a `host`, in which case there's nothing to grey.
+    func hostHealth(now: Date) -> ServerHostHealth {
+        if let fresh = freshSuccess(now: now) {
+            return fresh.host.map { .reported($0) } ?? .absent
+        }
+        return lastSuccess?.host.map { .unreachable(last: $0) } ?? .absent
     }
 }
 

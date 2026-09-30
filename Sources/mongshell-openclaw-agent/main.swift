@@ -1,9 +1,10 @@
 import Foundation
 
 // Server-side openclaw watchdog. Runs under launchd on the always-on mac:
-// probe the gateway → maybe hard-restart it → write the verdict to a JSON file
-// that `tailscale funnel` serves to the menubar clients. No network listener of
-// our own — funnel does the serving.
+// probe the gateway → maybe hard-restart it → judge the host's own signals
+// (power, disk) → write the verdicts to a JSON file that `tailscale funnel`
+// serves to the menubar clients. No network listener of our own — funnel does
+// the serving.
 
 // MARK: Options
 
@@ -93,6 +94,13 @@ func describe(_ verdict: ProbeVerdict) -> String {
     verdict.detailText.map { "\(verdict.healthName) (\($0))" } ?? verdict.healthName
 }
 
+func describe(_ host: HostStatus?) -> String {
+    guard let host else { return "읽을 신호 없음" }
+    let power = host.power.map { "전원 \($0.level.healthName)" } ?? "전원 없음"
+    let disk = host.disk.map { "디스크 \($0.level.healthName)" } ?? "디스크 없음"
+    return "\(host.level.healthName) (\(power), \(disk))"
+}
+
 // MARK: Loop
 
 /// Gives launchd a moment to bring the gateway back before re-probing.
@@ -102,6 +110,8 @@ let options = parseOptions(Array(CommandLine.arguments.dropFirst()))
 var lastHeal = StatusFile.readLastHeal(from: options.statusFile)
 var tracker = HealTracker(lastHealAt: lastHeal?.at)
 var lastLogged: ProbeVerdict?
+/// nil: nothing logged yet.
+var lastLoggedHostLevels: HostSignalLevels?
 
 log("시작 — status-file=\(options.statusFile.path) interval=\(options.interval)s autoHeal=\(options.autoHeal)")
 if options.gatewayLabel == options.selfLabel {
@@ -131,9 +141,11 @@ while true {
         }
     }
 
+    let host = HostRules.judge(power: HostProbe.readPower(), disk: HostProbe.readDisk())
+
     let status = AgentStatus(
         checkedAt: Date(), verdict: verdict, intervalSeconds: options.interval,
-        autoHeal: options.autoHeal, lastHeal: lastHeal)
+        autoHeal: options.autoHeal, lastHeal: lastHeal, host: host)
     do {
         try StatusFile.write(status, to: options.statusFile)
     } catch {
@@ -143,6 +155,13 @@ while true {
     if verdict != lastLogged {
         log("상태: \(describe(verdict))")
         lastLogged = verdict
+    }
+    // Per signal, not the overall level: power going bad while the disk
+    // already holds the overall level at warning is still a line.
+    let hostLevels = HostSignalLevels(host)
+    if hostLevels != lastLoggedHostLevels {
+        log("호스트: \(describe(host))")
+        lastLoggedHostLevels = hostLevels
     }
 
     Thread.sleep(forTimeInterval: TimeInterval(options.interval))

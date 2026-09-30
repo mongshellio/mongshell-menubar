@@ -14,6 +14,10 @@ struct SettingsView: View {
         prefs.showsOpenClaw ? openClaw.health.dotColor : nil
     }
 
+    private var serverHostPreviewColor: Color? {
+        prefs.showsOpenClaw ? openClaw.hostHealth.dotColor : nil
+    }
+
     var body: some View {
         Form {
             Section("일반") {
@@ -40,7 +44,8 @@ struct SettingsView: View {
                                    colorCoding: prefs.colorCoding,
                                    showPercent: prefs.showPercent,
                                    fiveHourReset: TimeText.clockShort(model.snapshot.fiveHourResetAt),
-                                   openClawDotColor: openClawPreviewColor)
+                                   openClawDotColor: openClawPreviewColor,
+                                   serverHostDotColor: serverHostPreviewColor)
                 }
 
                 Toggle("사용량 3단계 색상", isOn: $prefs.colorCoding)
@@ -64,7 +69,7 @@ struct SettingsView: View {
                 ClaudeSettingsSection(claude: claude)
             }
 
-            Section("openclaw") {
+            Section("서버") {
                 OpenClawSettingsSection(prefs: prefs, openClaw: openClaw)
             }
 

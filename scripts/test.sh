@@ -31,6 +31,7 @@ echo "▶ compiling openclaw agent tests"
 swiftc -o "$OUT/agent-tests" \
   "$AGENT/Probe.swift" \
   "$AGENT/Heal.swift" \
+  "$AGENT/HostProbe.swift" \
   "$AGENT/StatusFile.swift" \
   "$ROOT/Tests/OpenClawAgentTests/main.swift"
 
@@ -47,9 +48,12 @@ swiftc -o "$OUT/client-tests" \
   "$APP/Design/Palette.swift" \
   "$APP/Models/OpenClawHealth.swift" \
   "$APP/Models/OpenClawStatus.swift" \
+  "$APP/Models/ServerHost.swift" \
+  "$APP/Models/ServerHostAlertWatch.swift" \
   "$APP/Services/OpenClawStatusClient.swift" \
   "$APP/Services/TimeText.swift" \
   "$AGENT/Probe.swift" \
+  "$AGENT/HostProbe.swift" \
   "$AGENT/StatusFile.swift" \
   "$ROOT/Tests/OpenClawClientTests/main.swift"
 

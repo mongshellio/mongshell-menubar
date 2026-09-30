@@ -18,7 +18,7 @@ non_goals:
 | 종류 | 예 | 규칙 |
 |---|---|---|
 | 상태 소유 객체 | `UsageModel`, `OpenClawModel`, `ClaudeSettingsModel`, `Preferences` | `@MainActor final class … : ObservableObject` |
-| 값 타입 | `UsageSnapshot`, `ModelUsage`, `OpenClawHealth` | `struct`/`enum`, `Equatable`, 로직 없음에 가깝게. 단 판정 규칙을 테스트 가능하게 담는 순수 값 타입은 허용 (`OpenClawReading` — 두절 판정, `OpenClawHealWatch` — 복구 알림 판정) |
+| 값 타입 | `UsageSnapshot`, `ModelUsage`, `OpenClawHealth`, `ServerHost` / `ServerHostPower` / `ServerHostDisk` / `ServerHostLevel`, `ServerHostHealth` | `struct`/`enum`, `Equatable`, 로직 없음에 가깝게. 단 판정 규칙을 테스트 가능하게 담는 순수 값 타입은 허용 (`OpenClawReading` — 두절 판정, `OpenClawHealWatch` — 복구 알림 판정, `ServerHostAlertWatch` — 서버 호스트 알림 판정) |
 
 ## `@MainActor` 격리
 
@@ -52,7 +52,18 @@ non_goals:
 
 "전제가 없음" 을 별도 케이스로 둔다 — `OpenClawHealth.notConfigured` 처럼. `nil` 이나 `down` 으로 뭉뚱그리면 "완전히 감춘다" 와 "빨간 점을 띄운다" 를 구분할 수 없다 (PHILOSOPHY 원칙 2 / Decision #25). 같은 이유로 "상대에게 닿지 않음"(`.unreachable`, 회색)과 "상대가 고장을 보고함"(`.down`, 빨강)도 한 케이스로 합치지 않는다.
 
+`ServerHostHealth` 도 같은 구분을 따른다 (Decision #31) — 전제 없음은 `.absent` 별도 케이스다 (회색 점으로 대신하지 않는다), 두절은 `.unreachable(last:)` 로 마지막 값을 들고 간다, 신선도 판정은 `OpenClawReading` 한 곳에만 둔다 (`health(now:)` 와 `hostHealth(now:)` 가 같은 규칙을 쓴다). 각 케이스의 조건은 [docs/architecture.md § 3. openclaw 상태](../../../docs/architecture.md#3-openclaw-상태-선택-경로) 의 서버 호스트 신호 절이 권위다.
+
+**앱은 서버 호스트의 임계값을 갖지 않는다.** 레벨은 서버 에이전트가 판정해 보낸 것이고(`HostRules`), 모델 쪽 타입은 그것을 담아 표시 문구로 바꿀 뿐이다. 수치로 레벨을 다시 계산하는 코드를 넣지 않는다.
+
+**전원의 원인 문구는 `ServerHostPower.isOnBattery` 로만 분기한다** — 상태어와 알림 문구 모두 (사양: [docs/architecture.md § 3. openclaw 상태](../../../docs/architecture.md#3-openclaw-상태-선택-경로), 배경: Decision #31).
+
 ## 알림·백오프
 
 - 임계 알림은 **레벨이 올라갈 때 한 번만** 보낸다 (`lastNotifiedLevel`). 폴링마다 재발송하지 않는다.
+- 서버 호스트 알림(Decision #31)은 **신호별**(전원·디스크 따로)로 같은 원칙을 따른다. 규칙(기준점·상승 시 알림·쿨다운·미뤄 둔 알림·게이트)은 [docs/architecture.md § 3. openclaw 상태](../../../docs/architecture.md#3-openclaw-상태-선택-경로) 의 서버 호스트 신호 절이 권위이고, 여기서 지킬 규약은 넷이다.
+  - 판정은 순수 값 타입 `ServerHostAlertWatch` 에 둔다. 모델은 결과를 받아 보내기만 한다.
+  - 감시에는 **신선한 문서의 `host` 만** 넘긴다 — `hostHealth.reportedHost` (두절·부재는 `nil`; 배경: Decision #31).
+  - 알림 발송 여부는 복구 알림과 같은 문(`canNotifyAboutServer`)을 지나고, **문이 닫혀 있으면 그 사실을 감시에 넘긴다** (`observe(_:now:canNotify: false)`) — 감시가 그 관측으로 초기화된다.
+  - `observe` 는 성공 응답이 도착할 때만 부른다. 실패 응답에서 부르면 게이트 초기화 시점이 사양과 달라진다.
 - 429 백오프는 지수이며 상한이 있다. 백오프 상태를 폴링 주기 설정과 섞지 않는다 — 사용자 설정은 하한(`Config.minPollInterval`)과 함께 base 를 정할 뿐이다.

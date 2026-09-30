@@ -22,7 +22,7 @@ non_goals:
 | 사용량 API | `UsageAPIClient` |
 | OAuth 흐름 | `AuthService`, `LoopbackServer` |
 | 사용자 설정 파일 | `ClaudeSettingsStore` |
-| openclaw 서버 상태 URL (HTTPS 읽기 전용) | `OpenClawStatusClient` |
+| openclaw 서버 상태 URL (HTTPS 읽기 전용) — openclaw 판정과 서버 호스트 신호(`host`)를 한 문서에서 읽는다 | `OpenClawStatusClient` |
 | 로그인 항목 (ServiceManagement) | `LoginItemService` |
 
 `TimeText` 는 외부 경계가 아니라 포맷터다 — 위 타입들과 성격이 다르지만, 표시 문자열의 SSOT 을 한 곳에 두려고 여기 있다. 이 예외를 늘리지 않는다.
@@ -40,6 +40,7 @@ non_goals:
 **외부에서 들어오는 것은 관대하게, 사용자 것은 보수적으로.**
 
 - **API 응답**: 스키마가 비공개라 바뀔 수 있다. 후보 키 경로를 여러 개 탐색하고 채울 수 있는 것만 채운다. 필드 하나가 비어도 앱은 계속 동작해야 한다.
+- **서버 상태 문서의 부분 실패는 그 부분만 잃는다.** `host` 가 깨져 있어도 openclaw 판정은 읽는다. 단 판정을 **관대하게 읽되 초록으로 만들지 않는다** — 읽을 수 없는 판정은 `ok` 로 접지 않는다. 케이스별 읽기 규칙은 [docs/architecture.md § 3. openclaw 상태](../../../docs/architecture.md#3-openclaw-상태-선택-경로) 의 서버 호스트 신호 절, 배경은 Decision #31.
 - **사용자 파일**: 읽기에 실패하면 **쓰지 않는다.** 실패를 빈 값으로 강등하면 다음 저장이 파일을 날린다. 타입이 예상과 다른 값은 "비었다" 로 해석하지 않고 보존한다 (Decision #11).
 - 에러는 삼키지 말고 타입으로 올린다 (`APIError`, `AuthError`). 호출자가 401(재인증)과 429(백오프)를 구분할 수 있어야 한다.
 - 사용자에게 보일 메시지는 `LocalizedError` 로 한국어를 붙인다.

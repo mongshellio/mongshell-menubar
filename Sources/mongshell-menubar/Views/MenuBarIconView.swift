@@ -44,6 +44,13 @@ struct MenuBarIconView: View {
         prefs.showsOpenClaw ? openClaw.health.dotColor : nil
     }
 
+    /// Server host traffic-light color, stacked under the openclaw one. nil
+    /// when the server sends no host signals — the bar then looks exactly as
+    /// it did without them.
+    private var serverHostDotColor: Color? {
+        prefs.showsOpenClaw ? openClaw.hostHealth.dotColor : nil
+    }
+
     var body: some View {
         MenuBarContent(fiveHourUsed: fiveHourUsed, weeklyUsed: weeklyUsed,
                        showRemaining: prefs.showRemaining,
@@ -51,7 +58,8 @@ struct MenuBarIconView: View {
                        showPercent: prefs.showPercent,
                        fiveHourReset: TimeText.clockShort(model.snapshot.fiveHourResetAt),
                        pulsing: pulsing,
-                       openClawDotColor: openClawDotColor)
+                       openClawDotColor: openClawDotColor,
+                       serverHostDotColor: serverHostDotColor)
         .animation(shouldPulse
                    ? .easeInOut(duration: 0.55).repeatForever(autoreverses: true)
                    : .default,
@@ -77,6 +85,11 @@ struct MenuBarContent: View {
     /// Non-nil = append the unified openclaw indicator (paw + traffic-light dot)
     /// in this color. nil = hide it entirely.
     var openClawDotColor: Color? = nil
+    /// Non-nil = stack the server host indicator (server glyph + dot) under
+    /// the openclaw one, in this color. Both come from the same status
+    /// document, so it's only drawn next to the openclaw indicator. Like that
+    /// dot it ignores `colorCoding`: the color is the information.
+    var serverHostDotColor: Color? = nil
 
     var body: some View {
         HStack(spacing: 6) {
@@ -93,7 +106,12 @@ struct MenuBarContent: View {
             }
 
             if let openClawDotColor {
-                openClawIndicator(color: openClawDotColor, separated: showPercent)
+                if let serverHostDotColor {
+                    stackedIndicators(openClaw: openClawDotColor, serverHost: serverHostDotColor,
+                                      separated: showPercent)
+                } else {
+                    openClawIndicator(color: openClawDotColor, separated: showPercent)
+                }
             }
         }
         .padding(.horizontal, 2)
@@ -139,6 +157,50 @@ struct MenuBarContent: View {
                 .frame(width: 7, height: 7)
         }
     }
+
+    /// openclaw over server host: one glyph + dot row each, in the place of
+    /// the single openclaw indicator.
+    private func stackedIndicators(openClaw: Color, serverHost: Color,
+                                   separated: Bool) -> some View {
+        HStack(spacing: 4) {
+            if separated {
+                Text("·")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            VStack(spacing: StackedIndicator.rowSpacing) {
+                stackedRow(glyph: "pawprint.fill", color: openClaw)
+                stackedRow(glyph: "server.rack", color: serverHost)
+            }
+        }
+    }
+
+    private func stackedRow(glyph: String, color: Color) -> some View {
+        HStack(spacing: StackedIndicator.glyphDotSpacing) {
+            Image(systemName: glyph)
+                .font(.system(size: StackedIndicator.glyphSize, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: StackedIndicator.glyphColumnWidth)
+            Circle()
+                .fill(color)
+                .frame(width: StackedIndicator.dotSize, height: StackedIndicator.dotSize)
+        }
+        .frame(height: StackedIndicator.rowHeight)
+    }
+}
+
+/// Sizes of the two stacked indicators. Two rows and the gap between them
+/// (9 + 1 + 9 = 19pt) have to fit the 22pt menu bar, and the stack must not be
+/// wider than the single indicator it replaces (PHILOSOPHY § Admission
+/// Criteria 4).
+private enum StackedIndicator {
+    static let rowSpacing: CGFloat = 1
+    static let rowHeight: CGFloat = 9
+    static let glyphSize: CGFloat = 8
+    /// Fixed, so the two dots line up whatever the glyphs' own widths.
+    static let glyphColumnWidth: CGFloat = 11
+    static let glyphDotSpacing: CGFloat = 3
+    static let dotSize: CGFloat = 6
 }
 
 /// A minimal ring gauge sized for the menu bar (top-start, clockwise fill).

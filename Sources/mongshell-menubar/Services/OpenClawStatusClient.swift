@@ -180,7 +180,11 @@ struct OpenClawStatusClient: Sendable {
     /// ```
     /// {"schema":1,"checkedAt":"2026-09-29T03:12:45Z","health":"ok",
     ///  "detail":"Telegram default","intervalSeconds":60,"autoHeal":true,
-    ///  "lastHeal":{"at":"…","ok":true,"reason":"down"}}
+    ///  "lastHeal":{"at":"…","ok":true,"reason":"down"},
+    ///  "host":{"health":"warning",
+    ///          "power":{"health":"warning","pluggedIn":false,"charging":false,
+    ///                   "batteryPercent":82},
+    ///          "disk":{"health":"ok","availableBytes":32604813672}}}
     /// ```
     /// Lenient like the usage parser (Decision 2): unknown keys are ignored and
     /// a newer `schema` is still attempted. The only hard requirement is a
@@ -199,7 +203,8 @@ struct OpenClawStatusClient: Sendable {
             health: health(name: root["health"], detail: root["detail"] as? String),
             intervalSeconds: positiveInt(root["intervalSeconds"]),
             autoHeal: root["autoHeal"] as? Bool,
-            lastHeal: healEvent(root["lastHeal"])
+            lastHeal: healEvent(root["lastHeal"]),
+            host: host(root["host"])
         )
     }
 
@@ -256,6 +261,85 @@ struct OpenClawStatusClient: Sendable {
         return OpenClawHealEvent(at: at,
                                  ok: (dict["ok"] as? Bool) ?? true,
                                  reason: dict["reason"] as? String)
+    }
+
+    // MARK: Host (Decision #31)
+
+    /// The `host` object. Whatever is wrong with it costs only the host dot —
+    /// the openclaw verdict next to it is read regardless. An older agent
+    /// sends no `host`; one with no readable signal sends `null`.
+    private static func host(_ any: Any?) -> ServerHost? {
+        guard let dict = any as? [String: Any] else { return nil }
+        let power = hostPower(dict["power"])
+        let disk = hostDisk(dict["disk"])
+        // Without the agent's overall verdict, the worst signal stands in for
+        // it; with neither there is nothing to show.
+        let worstSignal = [power?.level, disk?.level].compactMap { $0 }.max()
+        guard let level = hostLevel(dict["health"]) ?? worstSignal else { return nil }
+        return ServerHost(level: level, power: power, disk: disk)
+    }
+
+    /// nil when there's no level at all — the key is missing or `null`. Any
+    /// other value we can't read, a word we don't know or not a string at
+    /// all, is `warning`: the agent judged something, and it must not be
+    /// painted green.
+    private static func hostLevel(_ any: Any?) -> ServerHostLevel? {
+        guard let any, !(any is NSNull) else { return nil }
+        switch any as? String {
+        case "ok":       return .ok
+        case "warning":  return .warning
+        case "critical": return .critical
+        default:         return .warning
+        }
+    }
+
+    /// A signal without a usable verdict of its own is unjudged, shown as
+    /// `warning` for the same reason an unknown level is.
+    private static let unjudgedLevel = ServerHostLevel.warning
+
+    /// An object that says nothing usable at all is no power signal.
+    private static func hostPower(_ any: Any?) -> ServerHostPower? {
+        guard let dict = any as? [String: Any] else { return nil }
+        let level = hostLevel(dict["health"])
+        let pluggedIn = bool(dict["pluggedIn"])
+        let charging = bool(dict["charging"])
+        let percent = batteryPercent(dict["batteryPercent"])
+        if level == nil, pluggedIn == nil, charging == nil, percent == nil { return nil }
+        return ServerHostPower(level: level ?? unjudgedLevel, pluggedIn: pluggedIn,
+                               charging: charging, batteryPercent: percent)
+    }
+
+    /// The free space is the signal: without a usable figure there is no disk.
+    private static func hostDisk(_ any: Any?) -> ServerHostDisk? {
+        guard let dict = any as? [String: Any],
+              let bytes = number(dict["availableBytes"]),
+              bytes >= 0, bytes < Double(Int64.max) else { return nil }
+        return ServerHostDisk(level: hostLevel(dict["health"]) ?? unjudgedLevel,
+                              availableBytes: Int64(bytes))
+    }
+
+    private static let percentRange = 0.0...100.0
+
+    private static func batteryPercent(_ any: Any?) -> Int? {
+        guard let value = number(any), percentRange.contains(value) else { return nil }
+        return Int(value)
+    }
+
+    /// A JSON `true` / `false` and nothing else: `as? Bool` would also take
+    /// the numbers 1 and 0, and "plugged in" must not be read out of a number.
+    private static func bool(_ any: Any?) -> Bool? {
+        guard let number = any as? NSNumber,
+              CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
+    }
+
+    /// A finite JSON number. JSONSerialization hands `true` back as an
+    /// NSNumber worth 1 — a bool is not a figure.
+    private static func number(_ any: Any?) -> Double? {
+        guard let number = any as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let value = number.doubleValue
+        return value.isFinite ? value : nil
     }
 
     private static func positiveInt(_ any: Any?) -> Int? {
