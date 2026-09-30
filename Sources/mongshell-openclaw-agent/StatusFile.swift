@@ -10,8 +10,12 @@ struct HealRecord: Codable, Equatable {
 
 /// The JSON document `tailscale funnel` serves to the menubar clients.
 /// Deliberately small: no PID, no raw probe output — this is public over HTTPS
-/// (behind only an unguessable path), so it carries the verdict and nothing more.
+/// (behind only an unguessable path), so it carries the verdicts and the
+/// figures they were judged from (battery percent, free bytes), and nothing
+/// that identifies the machine: no host name, no path, no version.
 struct AgentStatus: Encodable {
+    /// Stays 1 when keys are added (`host`, Decision #31) — clients ignore
+    /// keys they don't know.
     static let schemaVersion = 1
 
     let checkedAt: Date
@@ -19,13 +23,15 @@ struct AgentStatus: Encodable {
     let intervalSeconds: Int
     let autoHeal: Bool
     let lastHeal: HealRecord?
+    /// nil when no host signal could be read.
+    let host: HostStatus?
 
     private enum CodingKeys: String, CodingKey {
-        case schema, checkedAt, health, detail, intervalSeconds, autoHeal, lastHeal
+        case schema, checkedAt, health, detail, intervalSeconds, autoHeal, lastHeal, host
     }
 
-    /// Hand-written so `detail` / `lastHeal` are emitted as explicit `null`
-    /// instead of being dropped — clients see a stable key set.
+    /// Hand-written so `detail` / `lastHeal` / `host` are emitted as explicit
+    /// `null` instead of being dropped — clients see a stable key set.
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(Self.schemaVersion, forKey: .schema)
@@ -35,6 +41,7 @@ struct AgentStatus: Encodable {
         try c.encode(intervalSeconds, forKey: .intervalSeconds)
         try c.encode(autoHeal, forKey: .autoHeal)
         try c.encode(lastHeal, forKey: .lastHeal)
+        try c.encode(host, forKey: .host)
     }
 }
 
@@ -55,6 +62,58 @@ extension ProbeVerdict {
         case .down: return nil
         case .notInstalled: return "openclaw 바이너리 없음"
         }
+    }
+}
+
+extension HostLevel {
+    /// Wire value of every `health` under `host` — the only strings there.
+    var healthName: String {
+        switch self {
+        case .ok: return "ok"
+        case .warning: return "warning"
+        case .critical: return "critical"
+        }
+    }
+}
+
+/// Hand-written for the same reason as `AgentStatus`: a signal that couldn't
+/// be read (`power` on a mac without a battery) goes out as explicit `null`.
+extension HostStatus: Encodable {
+    private enum CodingKeys: String, CodingKey {
+        case health, power, disk
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(level.healthName, forKey: .health)
+        try c.encode(power, forKey: .power)
+        try c.encode(disk, forKey: .disk)
+    }
+}
+
+extension HostStatus.Power: Encodable {
+    private enum CodingKeys: String, CodingKey {
+        case health, pluggedIn, charging, batteryPercent
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(level.healthName, forKey: .health)
+        try c.encode(reading.pluggedIn, forKey: .pluggedIn)
+        try c.encode(reading.charging, forKey: .charging)
+        try c.encode(reading.batteryPercent, forKey: .batteryPercent)
+    }
+}
+
+extension HostStatus.Disk: Encodable {
+    private enum CodingKeys: String, CodingKey {
+        case health, availableBytes
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(level.healthName, forKey: .health)
+        try c.encode(reading.availableBytes, forKey: .availableBytes)
     }
 }
 

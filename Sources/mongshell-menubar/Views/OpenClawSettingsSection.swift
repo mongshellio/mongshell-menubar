@@ -64,7 +64,7 @@ struct OpenClawSettingsSection: View {
                 }
             }
 
-            LabeledContent("상태") {
+            LabeledContent("openclaw") {
                 HStack(spacing: 6) {
                     Circle()
                         .fill(openClaw.health.dotColor)

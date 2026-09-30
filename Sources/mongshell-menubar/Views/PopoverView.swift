@@ -25,6 +25,11 @@ struct PopoverView: View {
             if prefs.showsOpenClaw {
                 hairline
                 openClawSection
+                if let host = openClaw.hostHealth.host {
+                    hairline
+                    serverHostSection(host)
+                }
+                serverCheckedRow
             }
             hairline
             footer
@@ -63,20 +68,96 @@ struct PopoverView: View {
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            // Read-only by design (Decision #25): restarts happen on the server.
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 15)
+        .padding(.bottom, openClaw.hostHealth.host == nil ? 0 : Self.serverSectionBottomPadding)
+    }
+
+    // MARK: Server host (Decision #31)
+
+    /// Space under a server section that another section follows. The last
+    /// one is followed by `serverCheckedRow` instead, which brings its own.
+    private static let serverSectionBottomPadding: CGFloat = 16
+
+    /// The server's own signals, under the service that runs on it. Rows the
+    /// server didn't send (no battery → no power row) leave no gap.
+    private func serverHostSection(_ host: ServerHost) -> some View {
+        // Once the server has gone quiet the figures are only the last ones
+        // known: greyed, and no row is pointed at as the cause.
+        let stale: Bool
+        if case .unreachable = openClaw.hostHealth { stale = true } else { stale = false }
+        let powerText = host.power?.lineText
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Text(openClaw.checkedClockText.map { "서버 확인 \($0)" } ?? "서버 확인 기록 없음")
-                    .font(.system(size: 11))
-                    .monospacedDigit()
-                    .foregroundStyle(Palette.textTertiary)
+                Image(systemName: "server.rack")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.textSecondary)
+                Text("서버")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Palette.textSecondary)
                 Spacer(minLength: 8)
-                Button("새로고침") { openClaw.refreshNow() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                if let dotColor = openClaw.hostHealth.dotColor {
+                    Circle()
+                        .fill(dotColor)
+                        .frame(width: 7, height: 7)
+                }
+                Text(openClaw.hostHealth.shortLabel)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.textSecondary)
+            }
+
+            if powerText != nil || host.disk != nil {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let power = host.power, let powerText {
+                        serverHostRow(glyph: "bolt.fill", text: powerText,
+                                      level: power.level, stale: stale)
+                    }
+                    if let disk = host.disk {
+                        serverHostRow(glyph: "internaldrive.fill", text: disk.lineText,
+                                      level: disk.level, stale: stale)
+                    }
+                }
             }
         }
         .padding(.horizontal, 18)
         .padding(.top, 15)
+    }
+
+    /// One figure. The glyph takes the signal's level color when that signal
+    /// is a reason for the header's verdict; the text stays readable.
+    private func serverHostRow(glyph: String, text: String, level: ServerHostLevel,
+                               stale: Bool) -> some View {
+        let flagged = !stale && level != .ok
+        return HStack(spacing: 8) {
+            Image(systemName: glyph)
+                .font(.system(size: 11))
+                .foregroundStyle(flagged ? level.color : Palette.textTertiary)
+                .frame(width: 16)
+            Text(text)
+                .font(.system(size: 13))
+                .monospacedDigit()
+                .foregroundStyle(stale ? Palette.textTertiary : Palette.textPrimary)
+        }
+    }
+
+    /// When the status document was last read, and a way to read it again.
+    /// Both server sections come from that one document, so this sits once,
+    /// under the last of them. Read-only by design (Decision #25): restarts
+    /// happen on the server.
+    private var serverCheckedRow: some View {
+        HStack(spacing: 8) {
+            Text(openClaw.checkedClockText.map { "서버 확인 \($0)" } ?? "서버 확인 기록 없음")
+                .font(.system(size: 11))
+                .monospacedDigit()
+                .foregroundStyle(Palette.textTertiary)
+            Spacer(minLength: 8)
+            Button("새로고침") { openClaw.refreshNow() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 12)
         .padding(.bottom, 16)
     }
 

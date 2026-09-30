@@ -37,7 +37,22 @@ enum SnapshotRenderer {
         write(MenuBarStrip(scheme: .light).frame(width: 700, height: 44)
                 .environment(\.colorScheme, .light),
               to: base, "menubar_strip_light", scale: 3)
+        for scheme in [ColorScheme.dark, .light] {
+            let name = scheme == .dark ? "dark" : "light"
+            write(MenuBarHostStrip(scheme: scheme).frame(width: 900, height: 44)
+                    .environment(\.colorScheme, scheme),
+                  to: base, "menubar_host_strip_\(name)", scale: 3)
+        }
         write(PopoverPreview(), to: base, "popover", scale: 2)
+        OpenClawModel.shared.presentForSnapshot(
+            .snapshotOK(now: now, host: .snapshotOnBattery), now: now)
+        write(PopoverPreview(), to: base, "popover_host_on_battery", scale: 2)
+        OpenClawModel.shared.presentForSnapshot(
+            .snapshotOK(now: now, host: .snapshotDiskCritical), now: now)
+        write(PopoverPreview(), to: base, "popover_host_disk_critical", scale: 2)
+        OpenClawModel.shared.presentForSnapshot(
+            .snapshotUnreachable(now: now, host: .snapshotOnBattery), now: now)
+        write(PopoverPreview(), to: base, "popover_host_unreachable", scale: 2)
         OpenClawModel.shared.presentForSnapshot(.snapshotUnreachable(now: now), now: now)
         write(PopoverPreview(), to: base, "popover_openclaw_unreachable", scale: 2)
         OpenClawModel.shared.presentForSnapshot(.snapshotDown(now: now), now: now)
@@ -140,11 +155,11 @@ enum SnapshotRenderer {
 
 /// Canned openclaw readings for the reference images.
 private extension OpenClawReading {
-    static func snapshotOK(now: Date) -> OpenClawReading {
+    static func snapshotOK(now: Date, host: ServerHost? = nil) -> OpenClawReading {
         var reading = OpenClawReading()
         reading.recordSuccess(OpenClawStatus(
             checkedAt: now.addingTimeInterval(-40), health: .ok(detail: "Telegram default"),
-            intervalSeconds: 60, autoHeal: true, lastHeal: nil), receivedAt: now)
+            intervalSeconds: 60, autoHeal: true, lastHeal: nil, host: host), receivedAt: now)
         return reading
     }
 
@@ -153,19 +168,34 @@ private extension OpenClawReading {
         var reading = OpenClawReading()
         reading.recordSuccess(OpenClawStatus(
             checkedAt: now.addingTimeInterval(-40), health: .down(detail: "openclaw 바이너리 없음"),
-            intervalSeconds: 60, autoHeal: true, lastHeal: nil), receivedAt: now)
+            intervalSeconds: 60, autoHeal: true, lastHeal: nil, host: nil), receivedAt: now)
         return reading
     }
 
     /// Last good answer 23 minutes ago, and the latest request failed.
-    static func snapshotUnreachable(now: Date) -> OpenClawReading {
+    static func snapshotUnreachable(now: Date, host: ServerHost? = nil) -> OpenClawReading {
         var reading = OpenClawReading()
         reading.recordSuccess(OpenClawStatus(
             checkedAt: now.addingTimeInterval(-23 * 60), health: .ok(detail: "Telegram default"),
-            intervalSeconds: 60, autoHeal: true, lastHeal: nil), receivedAt: now)
+            intervalSeconds: 60, autoHeal: true, lastHeal: nil, host: host), receivedAt: now)
         reading.recordFailure(.offline)
         return reading
     }
+}
+
+/// Canned server host signals for the reference images.
+private extension ServerHost {
+    /// A laptop-as-server that lost its adapter.
+    static let snapshotOnBattery = ServerHost(
+        level: .warning,
+        power: ServerHostPower(level: .warning, pluggedIn: false, charging: false,
+                               batteryPercent: 82),
+        disk: ServerHostDisk(level: .ok, availableBytes: 32_604_813_672))
+
+    /// A server without a battery, its disk nearly full.
+    static let snapshotDiskCritical = ServerHost(
+        level: .critical, power: nil,
+        disk: ServerHostDisk(level: .critical, availableBytes: 4_200_000_000))
 }
 
 /// Menu-bar mock: Claude mark + `5h · 7d` text at three usage-level pairs, each
@@ -191,6 +221,43 @@ private struct MenuBarStrip: View {
         .padding(.horizontal, 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(scheme == .dark ? Color(hex: 0x2C2C30) : Color(hex: 0xE8E6E1))
+    }
+}
+
+/// Menu-bar mock for the stacked indicators: no host signals first (the
+/// single indicator, as a reference), then the server host dot at each level
+/// and unreachable, against different openclaw dots — the two are judged
+/// independently. The inner band is as thick as the real menu bar and clips,
+/// so a stack that doesn't fit shows up cut off.
+private struct MenuBarHostStrip: View {
+    let scheme: ColorScheme
+    private static let menuBarThickness: CGFloat = 22
+    private let items: [(id: Int, openClaw: OpenClawHealth, host: ServerHostHealth)] = [
+        (0, .ok(detail: ""), .absent),
+        (1, .ok(detail: ""), .reported(ServerHost(level: .ok, power: nil, disk: nil))),
+        (2, .ok(detail: ""), .reported(ServerHost(level: .warning, power: nil, disk: nil))),
+        (3, .down(detail: ""), .reported(ServerHost(level: .critical, power: nil, disk: nil))),
+        (4, .unreachable(detail: ""),
+         .unreachable(last: ServerHost(level: .ok, power: nil, disk: nil))),
+    ]
+    var body: some View {
+        HStack(spacing: 26) {
+            ForEach(items, id: \.id) { item in
+                MenuBarContent(fiveHourUsed: 12, weeklyUsed: 34,
+                               showRemaining: false, colorCoding: true,
+                               showPercent: true,
+                               fiveHourReset: "19:00",
+                               openClawDotColor: item.openClaw.dotColor,
+                               serverHostDotColor: item.host.dotColor)
+            }
+        }
+        .padding(.horizontal, 18)
+        .frame(maxWidth: .infinity)
+        .frame(height: Self.menuBarThickness)
+        .clipped()
+        .background(scheme == .dark ? Color(hex: 0x2C2C30) : Color(hex: 0xE8E6E1))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(scheme == .dark ? Color(hex: 0x1A1A1D) : Color(hex: 0xCFCDC8))
     }
 }
 
@@ -223,7 +290,7 @@ private struct ClaudeSectionPreview: View {
 private struct OpenClawSectionPreview: View {
     var body: some View {
         Form {
-            Section("openclaw") {
+            Section("서버") {
                 OpenClawSettingsSection(prefs: .shared, openClaw: .shared)
             }
         }

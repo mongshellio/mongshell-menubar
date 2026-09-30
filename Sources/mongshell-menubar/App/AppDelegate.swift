@@ -105,6 +105,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // openclaw indicator and changes the bar width — resize to match.
             DispatchQueue.main.async { self?.resizeStatusItem() }
         }.store(in: &cancellables)
+        // The server host indicator appearing or going away swaps the single
+        // openclaw indicator for the stacked pair, which isn't the same width.
+        openClaw.$hostHealth.map { $0 == .absent }.removeDuplicates()
+            .receive(on: RunLoop.main).sink { [weak self] _ in
+                DispatchQueue.main.async { self?.resizeStatusItem() }
+            }.store(in: &cancellables)
 
         resizeStatusItem()
         model.start()
