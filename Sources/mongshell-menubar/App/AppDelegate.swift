@@ -35,6 +35,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var hoverPopover: NSPopover!
+    /// Invisible, click-through window laid exactly over the status item while
+    /// the hover summary is up; the summary is anchored to it rather than to
+    /// the button. With the summary anchored to the button, the item's
+    /// background changed on hover as if it were selected — the anchoring is
+    /// the suspected cause (the system draws that highlight, so no API shows
+    /// it). The click popover stays anchored to the button.
+    private var hoverAnchor: NSWindow?
     /// Closes the hover summary if the cursor is no longer over the icon — see
     /// `showHoverSummary`. Set while the summary is shown; if something other
     /// than `hideHoverSummary` closes the summary, it clears itself on its
@@ -149,8 +156,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Show the instant hover summary below the icon. Suppressed while the full
     /// click popover is open so the two never stack.
     private func showHoverSummary() {
-        guard let button = statusItem.button, !popover.isShown, !hoverPopover.isShown else { return }
-        hoverPopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        guard !popover.isShown, !hoverPopover.isShown,
+              let frame = statusItemFrameOnScreen else { return }
+        let anchor = hoverAnchor ?? Self.makeHoverAnchor()
+        hoverAnchor = anchor
+        guard let anchorView = anchor.contentView else { return }
+        anchor.setFrame(frame, display: false)
+        anchor.orderFrontRegardless()
+        hoverPopover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
         // mouseExited normally closes the summary. If that event is ever
         // missed, nothing else would close an .applicationDefined popover, so
         // check the cursor position while the summary is up.
@@ -160,6 +173,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 if !self.hoverPopover.isShown || !self.isCursorOverStatusItem {
                     self.hideHoverSummary()
+                } else if let frame = self.statusItemFrameOnScreen {
+                    // The icon can change width while the summary is up (a
+                    // usage refresh); keep the anchor on it.
+                    self.hoverAnchor?.setFrame(frame, display: false)
                 }
             }
         }
@@ -173,12 +190,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hoverWatchdog?.invalidate()
         hoverWatchdog = nil
         hoverPopover.performClose(nil)
+        hoverAnchor?.orderOut(nil)
+    }
+
+    /// Borderless and fully transparent, and it ignores mouse events, so the
+    /// icon beneath still gets the hover tracking and the click.
+    private static func makeHoverAnchor() -> NSWindow {
+        let window = NSWindow(contentRect: .zero, styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.ignoresMouseEvents = true
+        window.level = .statusBar
+        // .fullScreenAuxiliary: the menu bar can be revealed over another
+        // app's full-screen space, and the summary has to show there too.
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
+        window.isExcludedFromWindowsMenu = true
+        return window
+    }
+
+    private var statusItemFrameOnScreen: NSRect? {
+        guard let button = statusItem.button, let window = button.window else { return nil }
+        return window.convertToScreen(button.convert(button.bounds, to: nil))
     }
 
     private var isCursorOverStatusItem: Bool {
-        guard let button = statusItem.button, let window = button.window else { return false }
-        let frameOnScreen = window.convertToScreen(button.convert(button.bounds, to: nil))
-        return frameOnScreen.contains(NSEvent.mouseLocation)
+        statusItemFrameOnScreen?.contains(NSEvent.mouseLocation) ?? false
     }
 
     @objc private func togglePopover() {
