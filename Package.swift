@@ -4,7 +4,10 @@ import PackageDescription
 let package = Package(
     name: "mongshell-menubar",
     platforms: [
-        .macOS(.v14)
+        // 두 타깃 모두에 적용된다. `swift build` 는 이 값을 바이너리의 SDK
+        // 버전으로도 찍고, macOS 는 그 값으로 호환 동작을 고른다. 14 였을 때는
+        // macOS 27 에서 앱을 실행할 때마다 빈 Settings 창이 떴다 (Decision #40).
+        .macOS("26.0")
     ],
     targets: [
         .executableTarget(

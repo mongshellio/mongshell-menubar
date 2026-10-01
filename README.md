@@ -66,7 +66,7 @@ Claude Code 는 설정 파일을 감시하므로 **대부분 실행 중인 세�
 > 있습니다.
 
 ## 설치 — 각자 빌드해서 쓰기 (Apple 계정 불필요)
-직접 빌드한 앱은 Gatekeeper에 막히지 않습니다. 필요한 건 **macOS 14+ 와 Xcode
+직접 빌드한 앱은 Gatekeeper에 막히지 않습니다. 필요한 건 **macOS 26+ 와 Xcode
 (또는 Command Line Tools)** 뿐.
 ```bash
 git clone <이 저장소 URL> && cd mongshell-menubar

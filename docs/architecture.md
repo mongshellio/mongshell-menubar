@@ -14,7 +14,7 @@ non_goals:
 | 층 | 사용 기술 |
 |---|---|
 | 언어 / 빌드 | Swift 6, SwiftPM (`swift-tools-version: 6.0`), executable 타깃 2개 — 메뉴바 앱 `mongshell-menubar` + 서버 에이전트 `mongshell-openclaw-agent` |
-| 최소 플랫폼 | macOS 14 |
+| 최소 플랫폼 | macOS 26 (Decision #40) |
 | UI | SwiftUI 뷰 + AppKit 호스팅 (`NSStatusItem`, `NSPopover`, `NSWindow`) |
 | 동시성 | Swift Concurrency (`@MainActor` 격리, `Task`, `async/await`) |
 | 네트워크 | `URLSession` (Foundation) |
