@@ -63,6 +63,8 @@ openclaw 게이트웨이가 24시간 도는 **서버 맥**에 설치하는 감�
 
 ### A. 기본 도구
 
+- [ ] **macOS 26 이상** — 에이전트가 메뉴바 앱과 같은 최소 버전으로 빌드된다 (Decision #40).
+
 - [ ] **Command Line Tools** (Swift 컴파일러 포함 — 설치 스크립트가 에이전트를 소스에서 빌드한다)
   ```bash
   xcode-select --install     # 이미 설치돼 있으면 "already installed" 로 끝난다
