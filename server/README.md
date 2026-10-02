@@ -561,7 +561,7 @@ cat ~/Library/Application\ Support/mongshell-openclaw-agent/status.json
 ```
 - `호스트:` 줄은 **신호별** 레벨(전원·디스크)이 하나라도 바뀌면 남는다. 종합이 그대로여도(예: 디스크 warning 인 채로 전원이 ok → warning) 새 줄이 생긴다. 레벨이 그대로인 수치 변화(잔량 82% → 81%)는 남기지 않는다 — 그때의 값은 `status.json` 을 본다.
 - 인자 오류는 시각 없이 `오류: …` 와 사용법을 출력하고 즉시 종료한다(exit 64). LaunchAgent 가 KeepAlive 로 계속 재기동한다.
-- `probe 결과를 받지 못함` 은 openclaw 실행에 실패했거나 출력이 완전히 비었을 때다. 게이트웨이가 아니라 에이전트 쪽 문제로 보고 판정하지 않는다 — `status.json` 을 쓰지 않고, 자동복구 횟수에도 넣지 않으며, 주기만큼 기다린 뒤 종료(exit 75)해 KeepAlive 로 새로 뜬다. 자동복구 직후의 재확인이 이렇게 끝나면 복구 기록(쿨다운)을 잃지 않도록 복구 전 판정으로 파일을 한 번 쓰고 종료한다. 계속되면 파일이 갱신되지 않아 맥북에는 ⚪ `서버 에이전트가 갱신을 멈췄습니다` 로 보인다. `launchctl print …` 의 `last exit code = 75` 가 그 흔적이다.
+- `probe 결과를 받지 못함` 은 openclaw 실행에 실패했거나 출력이 완전히 비었을 때다. 사유는 `openclaw 실행 실패 — <원인>`(예: `Too many open files`, `No such file or directory`), `probe 가 출력 없이 신호 N번으로 종료`, `probe 출력 없음 (exit N)`, `probe 출력 없음 (종료 상태 모름)` 중 하나다. 게이트웨이가 아니라 에이전트 쪽 문제로 보고 판정하지 않는다 — `status.json` 을 쓰지 않고, 자동복구 횟수에도 넣지 않으며, 주기만큼 기다린 뒤 종료(exit 75)해 KeepAlive 로 새로 뜬다. 자동복구 직후의 재확인이 이렇게 끝나면 복구 기록(쿨다운)을 잃지 않도록 복구 전 판정으로 파일을 한 번 쓰고 종료한다. 계속되면 파일이 갱신되지 않아 맥북에는 ⚪ `서버 에이전트가 갱신을 멈췄습니다` 로 보인다. `launchctl print …` 의 `last exit code = 75` 가 그 흔적이다.
 
 ## 6. 첫 설치 때 확인할 것 (실기 미검증 가정)
 

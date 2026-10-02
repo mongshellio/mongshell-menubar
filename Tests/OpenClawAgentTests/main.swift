@@ -20,7 +20,7 @@ func check(_ label: String, _ ok: Bool, _ detail: String = "") {
 }
 
 func observation(_ out: String, exit: Int32 = 0, timedOut: Bool = false) -> ProbeObservation {
-    Probe.parseProbe(.init(stdout: out, exitCode: exit, timedOut: timedOut))
+    Probe.parseProbe(.init(stdout: out, termination: .exited(status: exit), timedOut: timedOut))
 }
 
 /// The verdict of an observed probe; nil when the probe went unobserved.
@@ -85,13 +85,39 @@ do {
     check("빈 출력 → 관측 실패", isUnobserved(empty), "\(empty)")
     let blank = observation(" \n\t\n", exit: 1)
     check("공백만 → 관측 실패", isUnobserved(blank), "\(blank)")
-    let launchFailed = observation("", exit: -1)
-    check("실행 실패 → 관측 실패 + 사유", launchFailed == .unobserved(reason: "openclaw 실행 실패"),
-          "\(launchFailed)")
+
+    /// The unobserved reason, or nil when the probe was observed.
+    func reason(_ o: ProbeObservation) -> String? {
+        if case .unobserved(let r) = o { return r }
+        return nil
+    }
+
+    // The log line is the only place the cause shows up, so a launch failure
+    // must say why (fd exhaustion and a missing binary need different fixes).
     let missing = Probe.run("/nonexistent/openclaw", [], timeout: 1)
-    check("없는 경로 실행 → exit -1, 출력 없음, timedOut 아님",
-          missing.exitCode == -1 && missing.stdout.isEmpty && !missing.timedOut,
-          "\(missing.exitCode) \(missing.timedOut)")
+    let missingReason = reason(Probe.parseProbe(missing)) ?? ""
+    check("없는 경로 실행 → 실행 실패, 출력 없음, timedOut 아님",
+          missing.termination == .launchFailed(errno: ENOENT) && missing.stdout.isEmpty && !missing.timedOut,
+          "\(missing.termination) \(missing.timedOut)")
+    check("없는 경로 실행 → 사유에 strerror 문구", missingReason == "openclaw 실행 실패 — No such file or directory",
+          missingReason)
+    let notExecutable = root.appendingPathComponent("not-executable")
+    FileManager.default.createFile(atPath: notExecutable.path, contents: Data("#!/bin/sh\n".utf8),
+                                   attributes: [.posixPermissions: 0o644])
+    let denied = Probe.run(notExecutable.path, [], timeout: 1)
+    let deniedReason = reason(Probe.parseProbe(denied)) ?? ""
+    check("실행 권한 없음 → 사유에 strerror 문구", deniedReason == "openclaw 실행 실패 — Permission denied",
+          deniedReason)
+
+    // openclaw re-raises a worker's fatal signal on itself; with no output
+    // that is still not a statement about the gateway, but the log must say
+    // it was a signal rather than a silent exit.
+    let killed = Probe.run("/bin/sh", ["-c", "kill -9 $$"], timeout: 5)
+    let killedObservation = Probe.parseProbe(killed)
+    check("출력 없이 신호로 종료 → 관측 실패 + 신호 번호",
+          killed.termination == .signaled(SIGKILL)
+              && reason(killedObservation) == "probe 가 출력 없이 신호 9번으로 종료",
+          "\(killed.termination) \(killedObservation)")
 }
 
 // MARK: - 공개 detail 필터
@@ -124,7 +150,7 @@ do {
     check("매달린 프로세스는 timedOut", r.timedOut)
     check("데드라인 근처에서 끊김", elapsed < 3, String(format: "%.2fs", elapsed))
     let fine = Probe.run("/bin/echo", ["hi"], timeout: 5)
-    check("정상 종료는 timedOut 아님", !fine.timedOut && fine.exitCode == 0 && fine.stdout == "hi\n")
+    check("정상 종료는 timedOut 아님", !fine.timedOut && fine.termination == .exited(status: 0) && fine.stdout == "hi\n")
 }
 
 // MARK: - run() 자손 프로세스
@@ -165,7 +191,7 @@ do {
     let left = Probe.run("/bin/sh", ["-c", "sleep 30 & echo $!"], timeout: 5)
     let leftElapsed = Date().timeIntervalSince(leftStarted)
     let straggler = firstPid(left.stdout)
-    check("정상 종료 후 남은 자손 — 즉시 반환", !left.timedOut && left.exitCode == 0 && leftElapsed < 2,
+    check("정상 종료 후 남은 자손 — 즉시 반환", !left.timedOut && left.termination == .exited(status: 0) && leftElapsed < 2,
           String(format: "%.2fs", leftElapsed))
     check("정상 종료 후 남은 자손도 종료", straggler.map { isGone($0) } ?? false,
           "pid \(straggler.map(String.init) ?? "읽지 못함")")
@@ -173,10 +199,11 @@ do {
 
     // A descendant that escapes the group (its own session) can't be killed
     // by the runner and keeps the pipe open; the read must still give up at
-    // the overall deadline instead of waiting for it.
+    // the overall deadline instead of waiting for it. The shell ignores
+    // SIGTERM so it lives until the SIGKILL — the full deadline's path.
     let escapeStarted = Date()
     let escaped = Probe.run(
-        "/bin/sh", ["-c", #"perl -MPOSIX -e '$|=1; setsid(); print "$$\n"; sleep 30' & wait"#],
+        "/bin/sh", ["-c", #"trap '' TERM; perl -MPOSIX -e '$|=1; setsid(); print "$$\n"; sleep 30' & wait"#],
         timeout: 1)
     let escapeElapsed = Date().timeIntervalSince(escapeStarted)
     let escapee = firstPid(escaped.stdout)
@@ -186,6 +213,53 @@ do {
           String(format: "%.2fs (마감 %.1fs)", escapeElapsed, deadline))
     check("그룹을 빠져나간 자손 — 그때까지의 출력은 받음", escapee != nil, escaped.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
     if let escapee { kill(escapee, SIGKILL) }
+
+    // When the direct child exits on its own, its output is complete; an
+    // escaped descendant holding the pipe may cost only `readGrace` more,
+    // not the rest of the timeout.
+    let earlyStarted = Date()
+    let early = Probe.run(
+        "/bin/sh", ["-c", #"perl -MPOSIX -e '$|=1; setsid(); print "$$\n"; sleep 30' & sleep 0.3"#],
+        timeout: 5)
+    let earlyElapsed = Date().timeIntervalSince(earlyStarted)
+    let earlyEscapee = firstPid(early.stdout)
+    check("정상 종료 후 빠져나간 자손 — 종료 + readGrace 근처에서 반환",
+          !early.timedOut && early.termination == .exited(status: 0)
+              && earlyElapsed < 0.3 + Probe.readGrace + 1,
+          String(format: "%.2fs", earlyElapsed))
+    check("정상 종료 후 빠져나간 자손 — 출력은 받음", earlyEscapee != nil,
+          early.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+    if let earlyEscapee { kill(earlyEscapee, SIGKILL) }
+}
+
+// MARK: - run() 출력 상한
+
+print("▸ run() 출력 상한")
+do {
+    // Output past the cap is drained, not kept — and not left in the pipe,
+    // where it would block the child until the timeout.
+    let flood = Probe.run("/bin/sh", ["-c", #"head -c 200000 /dev/zero | tr '\0' a"#], timeout: 5)
+    check("상한 넘는 출력 → 상한까지만 보관",
+          flood.stdout.utf8.count == Probe.maxOutputBytes, "\(flood.stdout.utf8.count)B")
+    check("상한 넘는 출력 → 막히지 않고 정상 종료",
+          !flood.timedOut && flood.termination == .exited(status: 0), "\(flood.termination)")
+}
+
+// MARK: - run() 남이 수거한 자식
+
+print("▸ run() 남이 수거한 자식")
+do {
+    // With SIGCHLD ignored the kernel reaps children itself, so waitid sees
+    // ECHILD. That's an exit, not a hang — it must not wait out the timeout
+    // and report `timedOut` (which would read as gateway down).
+    let previous = signal(SIGCHLD, SIG_IGN)
+    let started = Date()
+    let r = Probe.run("/bin/echo", ["hi"], timeout: 2)
+    let elapsed = Date().timeIntervalSince(started)
+    signal(SIGCHLD, previous)
+    check("ECHILD → 시간 초과 아님, 종료 상태 모름",
+          !r.timedOut && r.termination == .unknown && r.stdout == "hi\n", "\(r.termination) \(r.timedOut)")
+    check("ECHILD → 곧바로 반환", elapsed < 1, String(format: "%.2fs", elapsed))
 }
 
 // MARK: - run() fd 누수

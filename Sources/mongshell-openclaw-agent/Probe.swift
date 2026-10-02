@@ -45,17 +45,33 @@ enum Probe {
 
     // MARK: Process runner
 
+    /// How the child ended, as far as the runner could tell.
+    enum Termination: Equatable {
+        case exited(status: Int32)
+        case signaled(Int32)
+        /// `pipe()` or `posix_spawn` failed with this errno; nothing ran.
+        case launchFailed(errno: Int32)
+        /// No status to report: the child was still running at the read
+        /// deadline, or it had already been reaped elsewhere (ECHILD).
+        case unknown
+    }
+
     struct RunResult {
         let stdout: String
-        let exitCode: Int32
+        let termination: Termination
         let timedOut: Bool
     }
 
     /// SIGTERM → SIGKILL grace on timeout.
     static let killGrace: TimeInterval = 1
-    /// Extra wait after the SIGKILL for output still in flight. Past it, the
-    /// read is abandoned even if something still holds the pipe open.
+    /// How long output may keep arriving after the direct child exits (or,
+    /// if it never does, after the SIGKILL). Past it, the read is abandoned
+    /// even if something still holds the pipe open.
     static let readGrace: TimeInterval = 1
+    /// Output kept per run. Real probe output is a few hundred bytes and the
+    /// verdict needs only that much; past the cap the pipe is still drained
+    /// (read and dropped) so a full pipe never blocks the child.
+    static let maxOutputBytes = 64 * 1024
     /// How often the runner wakes to check for exit and the deadlines.
     private static let tick: TimeInterval = 0.01
     private static let readChunkSize = 4096
@@ -71,25 +87,29 @@ enum Probe {
     /// - Once the direct child has exited, whatever is left of its group is
     ///   SIGKILL'd, so stragglers neither hold up the read nor pile up across
     ///   runs.
-    /// - Output is read without blocking, against the overall deadline: a
-    ///   descendant that left the group (setsid) and still holds the pipe can
-    ///   only cost the rest of the deadline, not stop the agent.
+    /// - Output is read without blocking, until `readGrace` after the direct
+    ///   child exits or the overall deadline, whichever is first: a descendant
+    ///   that left the group (setsid) and still holds the pipe can only cost
+    ///   that much, not stop the agent.
     ///
-    /// `exitCode` is the exit status, or the signal number if the child was
-    /// killed by one (as `Process.terminationStatus` reports it); -1 with empty
-    /// `stdout` when the launch itself failed. Every fd opened here is closed on
-    /// every path — the agent runs for weeks, and one fd leaked per probe once
-    /// hit the fd limit, after which every probe read empty output.
+    /// Every fd opened here is closed on every path — the agent runs for
+    /// weeks, and one fd leaked per probe once hit the fd limit, after which
+    /// every probe read empty output.
     static func run(_ path: String, _ args: [String], timeout: TimeInterval) -> RunResult {
         var fds: [Int32] = [-1, -1]
-        guard pipe(&fds) == 0 else { return RunResult(stdout: "", exitCode: -1, timedOut: false) }
+        guard pipe(&fds) == 0 else {
+            return RunResult(stdout: "", termination: .launchFailed(errno: errno), timedOut: false)
+        }
         let (readFD, writeFD) = (fds[0], fds[1])
         defer { close(readFD) }
 
-        let pid = spawnInNewGroup(path, args, output: writeFD)
+        var pid: pid_t = 0
+        let spawnError = spawnInNewGroup(path, args, output: writeFD, pid: &pid)
         // The child holds its own copy; ours must go or EOF never arrives.
         close(writeFD)
-        guard let pid else { return RunResult(stdout: "", exitCode: -1, timedOut: false) }
+        guard spawnError == 0 else {
+            return RunResult(stdout: "", termination: .launchFailed(errno: spawnError), timedOut: false)
+        }
 
         _ = fcntl(readFD, F_SETFL, fcntl(readFD, F_GETFL) | O_NONBLOCK)
 
@@ -101,20 +121,34 @@ enum Probe {
         var output = Data()
         var reachedEOF = false
         var exited = false
+        var reapable = false
+        var readUntil = giveUpAt
         var timedOut = false
         var killSent = false
         while true {
             if !reachedEOF { reachedEOF = readAvailable(readFD, into: &output) }
-            if !exited && hasExited(pid) {
-                exited = true
-                // Stragglers left in the group could hold the pipe and stall
-                // EOF; the child's own output is complete by now.
-                killGroup(of: pid)
+            let now = ProcessInfo.processInfo.systemUptime
+            if !exited {
+                switch childState(pid) {
+                case .running:
+                    break
+                case .exited:
+                    exited = true
+                    reapable = true
+                    // Stragglers left in the group could hold the pipe and
+                    // stall EOF; the child's own output is complete by now.
+                    killGroup(of: pid)
+                    readUntil = min(giveUpAt, now + readGrace)
+                case .reapedElsewhere:
+                    // Its pid — and so its group id — may already be reused,
+                    // so the group is left alone.
+                    exited = true
+                    readUntil = min(giveUpAt, now + readGrace)
+                }
             }
             if exited && reachedEOF { break }
 
-            let now = ProcessInfo.processInfo.systemUptime
-            if now >= giveUpAt { break }
+            if now >= readUntil { break }
             if !exited && now >= termAt && !timedOut {
                 timedOut = true
                 kill(-pid, SIGTERM)
@@ -133,17 +167,20 @@ enum Probe {
         }
 
         // Not exited even after the SIGKILL (stuck in the kernel): it's left
-        // unreaped rather than risk a blocking wait.
-        let exitCode = exited ? reap(pid) : -1
+        // unreaped rather than risk a blocking wait, and stays a zombie until
+        // the agent process itself is restarted.
+        let termination = reapable ? reap(pid) : .unknown
         return RunResult(stdout: String(decoding: output, as: UTF8.self),
-                         exitCode: exitCode, timedOut: timedOut)
+                         termination: termination, timedOut: timedOut)
     }
 
     /// posix_spawn with the child as leader of a new process group, stdin on
     /// /dev/null, stdout+stderr on `output`, and no other fd inherited. Signal
-    /// dispositions and mask are reset to defaults, as `Process` does. nil when
-    /// the spawn fails.
-    private static func spawnInNewGroup(_ path: String, _ args: [String], output: Int32) -> pid_t? {
+    /// dispositions and mask are reset to defaults, as `Process` does. Returns
+    /// posix_spawn's result — 0, or the errno it failed with — and sets `pid`
+    /// on success.
+    private static func spawnInNewGroup(_ path: String, _ args: [String], output: Int32,
+                                        pid: inout pid_t) -> Int32 {
         var attr: posix_spawnattr_t?
         posix_spawnattr_init(&attr)
         defer { posix_spawnattr_destroy(&attr) }
@@ -175,30 +212,41 @@ enum Probe {
             envp.forEach { free($0) }
         }
 
-        var pid: pid_t = 0
-        guard posix_spawn(&pid, path, &actions, &attr, argv, envp) == 0 else { return nil }
-        return pid
+        return posix_spawn(&pid, path, &actions, &attr, argv, envp)
     }
 
-    /// Appends whatever the pipe has right now. Returns true once the pipe is
-    /// at EOF (or unreadable) — nothing more will come.
+    /// Appends whatever the pipe has right now, up to `maxOutputBytes` in
+    /// total; the rest is read and dropped. Returns true once the pipe is at
+    /// EOF (or unreadable) — nothing more will come.
     private static func readAvailable(_ fd: Int32, into output: inout Data) -> Bool {
         var chunk = [UInt8](repeating: 0, count: readChunkSize)
         while true {
             let n = read(fd, &chunk, chunk.count)
-            if n > 0 { output.append(chunk, count: n); continue }
+            if n > 0 {
+                let room = maxOutputBytes - output.count
+                if room > 0 { output.append(chunk, count: min(n, room)) }
+                continue
+            }
             if n == 0 { return true }
             if errno == EINTR { continue }
             return errno != EAGAIN
         }
     }
 
-    /// Whether `pid` has exited, without reaping it: an unreaped child keeps
-    /// its pid — and so its process group id — from being reused, which is
-    /// what makes `killGroup` safe to call after the exit.
-    private static func hasExited(_ pid: pid_t) -> Bool {
+    private enum ChildState { case running, exited, reapedElsewhere }
+
+    /// Checks `pid` without reaping it: an unreaped child keeps its pid — and
+    /// so its process group id — from being reused, which is what makes
+    /// `killGroup` safe to call after the exit.
+    private static func childState(_ pid: pid_t) -> ChildState {
         var info = siginfo_t()
-        return waitid(P_PID, id_t(pid), &info, WEXITED | WNOHANG | WNOWAIT) == 0 && info.si_pid == pid
+        if waitid(P_PID, id_t(pid), &info, WEXITED | WNOHANG | WNOWAIT) == 0 {
+            return info.si_pid == pid ? .exited : .running
+        }
+        // ECHILD: no such child any more — it exited and something else
+        // reaped it (e.g. SIGCHLD set to ignore). Waiting on would only end
+        // in a false timeout.
+        return errno == ECHILD ? .reapedElsewhere : .running
     }
 
     /// Best-effort: SIGKILLs every process still in the group `pid` leads.
@@ -206,12 +254,14 @@ enum Probe {
         kill(-pid, SIGKILL)
     }
 
-    /// Reaps the exited child; returns its exit status (or terminating signal).
-    private static func reap(_ pid: pid_t) -> Int32 {
+    /// Reaps the exited child.
+    private static func reap(_ pid: pid_t) -> Termination {
         var status: Int32 = 0
-        while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+        while waitpid(pid, &status, 0) == -1 {
+            if errno != EINTR { return .unknown }
+        }
         let signal = status & 0x7f
-        return signal == 0 ? (status >> 8) & 0xff : signal
+        return signal == 0 ? .exited(status: (status >> 8) & 0xff) : .signaled(signal)
     }
 
     // MARK: Probe + parse
@@ -234,12 +284,22 @@ enum Probe {
         // openclaw always says something when it finishes — even "not
         // reachable" is output. Nothing at all means the agent didn't get to
         // hear it (spawn failed, fds exhausted), and judging that `down` once
-        // made a healthy gateway restart every 10 minutes.
+        // made a healthy gateway restart every 10 minutes. A signal death
+        // without output lands here too: openclaw re-raises its worker's
+        // fatal signal on itself, so it points at the CLI, not the gateway.
         if result.stdout.allSatisfy(\.isWhitespace) {
-            let reason = result.exitCode == -1 ? "openclaw 실행 실패" : "probe 출력 없음 (exit \(result.exitCode))"
-            return .unobserved(reason: reason)
+            return .unobserved(reason: silentReason(result.termination))
         }
         return .observed(verdict(fromOutput: result))
+    }
+
+    private static func silentReason(_ termination: Termination) -> String {
+        switch termination {
+        case .launchFailed(let code): return "openclaw 실행 실패 — \(String(cString: strerror(code)))"
+        case .signaled(let signal): return "probe 가 출력 없이 신호 \(signal)번으로 종료"
+        case .exited(let status): return "probe 출력 없음 (exit \(status))"
+        case .unknown: return "probe 출력 없음 (종료 상태 모름)"
+        }
     }
 
     /// The verdict rules proper, for a probe that finished and said something.
@@ -267,7 +327,7 @@ enum Probe {
         // channels is OK-but-empty; anything else (nonzero exit, or no positive
         // reachable signal at all) is treated as the gateway being down.
         if channelLines.isEmpty {
-            if result.exitCode == 0 && lower.contains("reachable") {
+            if result.termination == .exited(status: 0) && lower.contains("reachable") {
                 return .ok(detail: "채널 없음")
             }
             return .down
