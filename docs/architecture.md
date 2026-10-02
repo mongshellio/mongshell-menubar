@@ -75,8 +75,9 @@ UsageModel.pollLoop()  ──(@MainActor, Task)
 
 ```
 [서버 맥] mongshell-openclaw-agent  ──(LaunchAgent, 기본 60초 주기)
-   └─ Probe → Process: `openclaw channels status --probe`
+   └─ Probe → posix_spawn: `openclaw channels status --probe`  (새 프로세스 그룹, 8초 초과 시 그룹 SIGTERM → 1초 → SIGKILL, 출력 읽기는 최대 10초)
         └─ 파싱 → ok / degraded / down  (공개 detail 은 허용 문자 필터 통과분만)
+        └─ 실행 실패·빈 출력 → 관측 실패: 게시·복구 카운트 없이 주기만큼 대기 후 종료(exit 75) → KeepAlive 재기동
    └─ 자동복구: 2회 연속 실패 + 쿨다운 600초 → launchctl kickstart -k <게이트웨이 레이블>
    └─ HostProbe → IOKit 전원 정보 + 홈 볼륨 여유 공간  (읽기만)
         └─ HostRules → 신호별·종합 ok / warning / critical  (읽을 신호가 없으면 host = null)

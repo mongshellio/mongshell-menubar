@@ -12,6 +12,17 @@ enum ProbeVerdict: Equatable {
     case notInstalled
 }
 
+/// What one probe told the agent. Only `.observed` carries a verdict, and only
+/// a verdict can go into the status file (`AgentStatus.verdict` is a
+/// `ProbeVerdict`) — so a probe the agent failed to hear can never be published
+/// or counted toward a heal.
+enum ProbeObservation: Equatable {
+    case observed(ProbeVerdict)
+    /// The agent got nothing to judge — a failure on the agent's side, not a
+    /// statement about the gateway.
+    case unobserved(reason: String)
+}
+
 /// The single home of the openclaw health rules (Decision #25). Originally
 /// ported from the app's local probe; the app now only reads the verdict this
 /// agent publishes, so a rule change lands here alone.
@@ -40,80 +51,199 @@ enum Probe {
         let timedOut: Bool
     }
 
-    /// Runs `path args…`, merging stdout+stderr, bounded by `timeout`. On
-    /// timeout the process is SIGTERM'd then SIGKILL'd and `timedOut` is true.
+    /// SIGTERM → SIGKILL grace on timeout.
+    static let killGrace: TimeInterval = 1
+    /// Extra wait after the SIGKILL for output still in flight. Past it, the
+    /// read is abandoned even if something still holds the pipe open.
+    static let readGrace: TimeInterval = 1
+    /// How often the runner wakes to check for exit and the deadlines.
+    private static let tick: TimeInterval = 0.01
+    private static let readChunkSize = 4096
+
+    /// Runs `path args…` with stdout+stderr merged into one pipe and stdin on
+    /// /dev/null. Returns within about `timeout + killGrace + readGrace`
+    /// seconds whatever the child and its descendants do.
     ///
-    /// Blocking. openclaw probe output is a handful of lines, well under the
-    /// pipe buffer, so reading after the process exits cannot deadlock here.
+    /// - The child leads a new process group, so on timeout the whole group is
+    ///   SIGTERM'd, then SIGKILL'd after `killGrace` — openclaw re-executes
+    ///   itself with inherited stdio, and the real worker is a grandchild that
+    ///   a kill of the direct child alone leaves running (and holding the pipe).
+    /// - Once the direct child has exited, whatever is left of its group is
+    ///   SIGKILL'd, so stragglers neither hold up the read nor pile up across
+    ///   runs.
+    /// - Output is read without blocking, against the overall deadline: a
+    ///   descendant that left the group (setsid) and still holds the pipe can
+    ///   only cost the rest of the deadline, not stop the agent.
+    ///
+    /// `exitCode` is the exit status, or the signal number if the child was
+    /// killed by one (as `Process.terminationStatus` reports it); -1 with empty
+    /// `stdout` when the launch itself failed. Every fd opened here is closed on
+    /// every path — the agent runs for weeks, and one fd leaked per probe once
+    /// hit the fd limit, after which every probe read empty output.
     static func run(_ path: String, _ args: [String], timeout: TimeInterval) -> RunResult {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: path)
-        proc.arguments = args
+        var fds: [Int32] = [-1, -1]
+        guard pipe(&fds) == 0 else { return RunResult(stdout: "", exitCode: -1, timedOut: false) }
+        let (readFD, writeFD) = (fds[0], fds[1])
+        defer { close(readFD) }
+
+        let pid = spawnInNewGroup(path, args, output: writeFD)
+        // The child holds its own copy; ours must go or EOF never arrives.
+        close(writeFD)
+        guard let pid else { return RunResult(stdout: "", exitCode: -1, timedOut: false) }
+
+        _ = fcntl(readFD, F_SETFL, fcntl(readFD, F_GETFL) | O_NONBLOCK)
+
+        let start = ProcessInfo.processInfo.systemUptime
+        let termAt = start + timeout
+        let killAt = termAt + killGrace
+        let giveUpAt = killAt + readGrace
+
+        var output = Data()
+        var reachedEOF = false
+        var exited = false
+        var timedOut = false
+        var killSent = false
+        while true {
+            if !reachedEOF { reachedEOF = readAvailable(readFD, into: &output) }
+            if !exited && hasExited(pid) {
+                exited = true
+                // Stragglers left in the group could hold the pipe and stall
+                // EOF; the child's own output is complete by now.
+                killGroup(of: pid)
+            }
+            if exited && reachedEOF { break }
+
+            let now = ProcessInfo.processInfo.systemUptime
+            if now >= giveUpAt { break }
+            if !exited && now >= termAt && !timedOut {
+                timedOut = true
+                kill(-pid, SIGTERM)
+            }
+            if !exited && now >= killAt && !killSent {
+                killSent = true
+                killGroup(of: pid)
+            }
+
+            if reachedEOF {
+                Thread.sleep(forTimeInterval: tick)
+            } else {
+                var pfd = pollfd(fd: readFD, events: Int16(POLLIN), revents: 0)
+                _ = poll(&pfd, 1, Int32(tick * 1000))
+            }
+        }
+
+        // Not exited even after the SIGKILL (stuck in the kernel): it's left
+        // unreaped rather than risk a blocking wait.
+        let exitCode = exited ? reap(pid) : -1
+        return RunResult(stdout: String(decoding: output, as: UTF8.self),
+                         exitCode: exitCode, timedOut: timedOut)
+    }
+
+    /// posix_spawn with the child as leader of a new process group, stdin on
+    /// /dev/null, stdout+stderr on `output`, and no other fd inherited. Signal
+    /// dispositions and mask are reset to defaults, as `Process` does. nil when
+    /// the spawn fails.
+    private static func spawnInNewGroup(_ path: String, _ args: [String], output: Int32) -> pid_t? {
+        var attr: posix_spawnattr_t?
+        posix_spawnattr_init(&attr)
+        defer { posix_spawnattr_destroy(&attr) }
+        let flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT
+            | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
+        posix_spawnattr_setflags(&attr, Int16(flags))
+        posix_spawnattr_setpgroup(&attr, 0) // 0: a new group whose id is the child's pid
+        var allSignals = sigset_t()
+        sigfillset(&allSignals)
+        posix_spawnattr_setsigdefault(&attr, &allSignals)
+        var noSignals = sigset_t()
+        sigemptyset(&noSignals)
+        posix_spawnattr_setsigmask(&attr, &noSignals)
+
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)
+        posix_spawn_file_actions_adddup2(&actions, output, STDOUT_FILENO)
+        posix_spawn_file_actions_adddup2(&actions, output, STDERR_FILENO)
 
         // Give the child a real PATH so anything openclaw shells out to resolves.
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-        proc.environment = env
-
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = pipe
-
-        // The read end is closed explicitly, not left to deallocation (Process
-        // already closes the parent's write end after launch; on launch failure
-        // both ends are closed here). The agent's loop runs headless for weeks,
-        // and one leaked fd per probe once hit the process fd limit — after
-        // which every probe read empty output and a healthy gateway was judged
-        // down.
-        do {
-            try proc.run()
-        } catch {
-            try? pipe.fileHandleForReading.close()
-            try? pipe.fileHandleForWriting.close()
-            return RunResult(stdout: "", exitCode: -1, timedOut: false)
+        let argv = ([path] + args).map { strdup($0) } + [nil]
+        let envp = env.map { strdup("\($0.key)=\($0.value)") } + [nil]
+        defer {
+            argv.forEach { free($0) }
+            envp.forEach { free($0) }
         }
 
-        // Poll for exit up to the deadline; escalate SIGTERM → SIGKILL so a
-        // hung longpoll can't wedge us.
-        let deadline = Date().addingTimeInterval(timeout)
-        var timedOut = false
-        while proc.isRunning {
-            if Date() >= deadline {
-                timedOut = true
-                proc.terminate() // SIGTERM
-                let killBy = Date().addingTimeInterval(1.0)
-                while proc.isRunning && Date() < killBy {
-                    Thread.sleep(forTimeInterval: 0.05)
-                }
-                if proc.isRunning { kill(proc.processIdentifier, SIGKILL) }
-                break
-            }
-            Thread.sleep(forTimeInterval: 0.05)
-        }
+        var pid: pid_t = 0
+        guard posix_spawn(&pid, path, &actions, &attr, argv, envp) == 0 else { return nil }
+        return pid
+    }
 
-        // The write end is closed now (process dead), so this returns promptly.
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        try? pipe.fileHandleForReading.close()
-        proc.waitUntilExit()
-        let out = String(data: data, encoding: .utf8) ?? ""
-        return RunResult(stdout: out, exitCode: proc.terminationStatus, timedOut: timedOut)
+    /// Appends whatever the pipe has right now. Returns true once the pipe is
+    /// at EOF (or unreadable) — nothing more will come.
+    private static func readAvailable(_ fd: Int32, into output: inout Data) -> Bool {
+        var chunk = [UInt8](repeating: 0, count: readChunkSize)
+        while true {
+            let n = read(fd, &chunk, chunk.count)
+            if n > 0 { output.append(chunk, count: n); continue }
+            if n == 0 { return true }
+            if errno == EINTR { continue }
+            return errno != EAGAIN
+        }
+    }
+
+    /// Whether `pid` has exited, without reaping it: an unreaped child keeps
+    /// its pid — and so its process group id — from being reused, which is
+    /// what makes `killGroup` safe to call after the exit.
+    private static func hasExited(_ pid: pid_t) -> Bool {
+        var info = siginfo_t()
+        return waitid(P_PID, id_t(pid), &info, WEXITED | WNOHANG | WNOWAIT) == 0 && info.si_pid == pid
+    }
+
+    /// Best-effort: SIGKILLs every process still in the group `pid` leads.
+    private static func killGroup(of pid: pid_t) {
+        kill(-pid, SIGKILL)
+    }
+
+    /// Reaps the exited child; returns its exit status (or terminating signal).
+    private static func reap(_ pid: pid_t) -> Int32 {
+        var status: Int32 = 0
+        while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+        let signal = status & 0x7f
+        return signal == 0 ? (status >> 8) & 0xff : signal
     }
 
     // MARK: Probe + parse
 
-    /// Live health probe. Returns `.notInstalled` if the binary is missing.
-    static func probe() -> ProbeVerdict {
-        guard let bin = binaryPath() else { return .notInstalled }
+    /// Live health probe. `run` is nil when no binary was found (then the
+    /// observation is `.notInstalled`); it's returned so the caller can log a
+    /// timeout, which the verdict alone (`down`) doesn't tell apart.
+    static func probe() -> (run: RunResult?, observation: ProbeObservation) {
+        guard let bin = binaryPath() else { return (nil, .observed(.notInstalled)) }
         let result = run(bin, ["channels", "status", "--probe"], timeout: probeTimeout)
-        return parseProbe(result)
+        return (result, parseProbe(result))
     }
 
-    /// Turns `openclaw channels status --probe` output into a verdict, per the
-    /// hard-won domain rules. Kept pure (no I/O) so it's trivially testable.
-    static func parseProbe(_ result: RunResult) -> ProbeVerdict {
+    /// Turns `openclaw channels status --probe` output into an observation, per
+    /// the hard-won domain rules. Kept pure (no I/O) so it's trivially testable.
+    static func parseProbe(_ result: RunResult) -> ProbeObservation {
         // A hung/killed probe means the gateway isn't answering.
-        if result.timedOut { return .down }
+        if result.timedOut { return .observed(.down) }
 
+        // openclaw always says something when it finishes — even "not
+        // reachable" is output. Nothing at all means the agent didn't get to
+        // hear it (spawn failed, fds exhausted), and judging that `down` once
+        // made a healthy gateway restart every 10 minutes.
+        if result.stdout.allSatisfy(\.isWhitespace) {
+            let reason = result.exitCode == -1 ? "openclaw 실행 실패" : "probe 출력 없음 (exit \(result.exitCode))"
+            return .unobserved(reason: reason)
+        }
+        return .observed(verdict(fromOutput: result))
+    }
+
+    /// The verdict rules proper, for a probe that finished and said something.
+    private static func verdict(fromOutput result: RunResult) -> ProbeVerdict {
         let text = result.stdout
         let lower = text.lowercased()
 

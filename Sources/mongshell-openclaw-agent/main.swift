@@ -10,8 +10,9 @@ import Foundation
 
 struct Options {
     static let defaultInterval = 60
-    /// Probe takes up to 8s and heal adds 3s + a re-probe; below this the loop
-    /// would spend most of its time probing.
+    /// A probe takes up to 10s (8s timeout + kill and read grace) and a heal
+    /// adds 3s + a re-probe; below this the loop would spend most of its time
+    /// probing.
     static let minimumInterval = 15
     /// A day. Clients derive their "server unreachable" threshold from
     /// 3×interval, so an unbounded value would mean a dead agent is never
@@ -105,6 +106,9 @@ func describe(_ host: HostStatus?) -> String {
 
 /// Gives launchd a moment to bring the gateway back before re-probing.
 let postHealSettle: TimeInterval = 3
+/// EX_TEMPFAIL: the agent exits after a probe it couldn't hear (see below), and
+/// launchd's KeepAlive starts a fresh process.
+let unobservedExitCode: Int32 = 75
 
 let options = parseOptions(Array(CommandLine.arguments.dropFirst()))
 var lastHeal = StatusFile.readLastHeal(from: options.statusFile)
@@ -112,61 +116,104 @@ var tracker = HealTracker(lastHealAt: lastHeal?.at)
 var lastLogged: ProbeVerdict?
 /// nil: nothing logged yet.
 var lastLoggedHostLevels: HostSignalLevels?
+/// Timeout is logged on the first of a run of timed-out probes only.
+var lastProbeTimedOut = false
 
 log("시작 — status-file=\(options.statusFile.path) interval=\(options.interval)s autoHeal=\(options.autoHeal)")
 if options.gatewayLabel == options.selfLabel {
     log("경고: --gateway-label 이 자기 레이블(\(options.selfLabel))이라 무시하고 자동 탐색합니다")
 }
 
+/// One probe, with a log line when it timed out.
+@MainActor func probeGateway() -> ProbeObservation {
+    let (run, observation) = Probe.probe()
+    let timedOut = run?.timedOut ?? false
+    if timedOut && !lastProbeTimedOut {
+        log("probe 시간 초과 — \(Int(Probe.probeTimeout))초 안에 끝나지 않아 프로세스 그룹을 종료")
+    }
+    lastProbeTimedOut = timedOut
+    return observation
+}
+
+/// A probe the agent couldn't hear says nothing about the gateway, so it is
+/// neither published nor counted toward a heal. The cause is usually in this
+/// process (an exhausted fd table once made every probe read empty), so rather
+/// than retry in place the agent waits one interval — launchd would otherwise
+/// restart it in a tight loop — and exits for a fresh start.
+@MainActor func restartAfterUnobserved(_ reason: String) -> Never {
+    log("probe 결과를 받지 못함 — \(reason). 게시·복구 없이 \(options.interval)초 뒤 재시작")
+    Thread.sleep(forTimeInterval: TimeInterval(options.interval))
+    exit(unobservedExitCode)
+}
+
+/// Judges the host signals and writes the status file, logging changes.
+@MainActor func publish(_ verdict: ProbeVerdict, checkedAt: Date) {
+    let host = HostRules.judge(power: HostProbe.readPower(), disk: HostProbe.readDisk())
+
+    let status = AgentStatus(
+        checkedAt: checkedAt, verdict: verdict, intervalSeconds: options.interval,
+        autoHeal: options.autoHeal, lastHeal: lastHeal, host: host)
+    do {
+        try StatusFile.write(status, to: options.statusFile)
+    } catch {
+        log("상태 파일 쓰기 실패 — \(error.localizedDescription)")
+    }
+
+    if verdict != lastLogged {
+        log("상태: \(describe(verdict))")
+        lastLogged = verdict
+    }
+    // Per signal, not the overall level: power going bad while the disk
+    // already holds the overall level at warning is still a line.
+    let hostLevels = HostSignalLevels(host)
+    if hostLevels != lastLoggedHostLevels {
+        log("호스트: \(describe(host))")
+        lastLoggedHostLevels = hostLevels
+    }
+}
+
 while true {
-    // Top-level code has no run loop to drain autoreleased Foundation objects
-    // (Process, Pipe, FileHandle…), so each iteration drains its own pool.
+    // Top-level code has no run loop to drain autoreleased Foundation objects,
+    // so each iteration drains its own pool.
     autoreleasepool {
-        var verdict = Probe.probe()
+        var verdict: ProbeVerdict
+        switch probeGateway() {
+        case .observed(let v): verdict = v
+        case .unobserved(let reason): restartAfterUnobserved(reason)
+        }
+        var checkedAt = Date()
 
         if options.autoHeal {
             tracker.record(verdict)
-            let now = Date()
-            if tracker.isHealDue(now: now) {
+            if tracker.isHealDue(now: checkedAt) {
                 let label = Launchd.gatewayLabel(
                     explicit: options.gatewayLabel, selfLabel: options.selfLabel,
                     in: Launchd.userLaunchAgentsDir)
                 let ok = Launchd.kickstart(label: label)
-                tracker.markHealed(at: now)
-                lastHeal = HealRecord(at: now, ok: ok, reason: verdict.healthName)
+                tracker.markHealed(at: checkedAt)
+                lastHeal = HealRecord(at: checkedAt, ok: ok, reason: verdict.healthName)
                 log("복구 시도 — \(label) kickstart \(ok ? "성공" : "실패") (원인: \(describe(verdict)))")
 
                 Thread.sleep(forTimeInterval: postHealSettle)
-                verdict = Probe.probe()
-                // Counted like any probe (as the app's post-heal refresh is); the
-                // cooldown just set keeps it from triggering another heal.
-                tracker.record(verdict)
+                switch probeGateway() {
+                case .observed(let v):
+                    verdict = v
+                    checkedAt = Date()
+                    // Counted like any probe (as the app's post-heal refresh
+                    // is); the cooldown just set keeps it from triggering
+                    // another heal.
+                    tracker.record(verdict)
+                case .unobserved(let reason):
+                    // The heal must still reach the file: the next process
+                    // takes its cooldown from `lastHeal` there. Published with
+                    // the pre-heal verdict and the time it was observed.
+                    publish(verdict, checkedAt: checkedAt)
+                    restartAfterUnobserved(reason)
+                }
             }
         }
 
-        let host = HostRules.judge(power: HostProbe.readPower(), disk: HostProbe.readDisk())
-
-        let status = AgentStatus(
-            checkedAt: Date(), verdict: verdict, intervalSeconds: options.interval,
-            autoHeal: options.autoHeal, lastHeal: lastHeal, host: host)
-        do {
-            try StatusFile.write(status, to: options.statusFile)
-        } catch {
-            log("상태 파일 쓰기 실패 — \(error.localizedDescription)")
-        }
-
-        if verdict != lastLogged {
-            log("상태: \(describe(verdict))")
-            lastLogged = verdict
-        }
-        // Per signal, not the overall level: power going bad while the disk
-        // already holds the overall level at warning is still a line.
-        let hostLevels = HostSignalLevels(host)
-        if hostLevels != lastLoggedHostLevels {
-            log("호스트: \(describe(host))")
-            lastLoggedHostLevels = hostLevels
-        }
-
+        publish(verdict, checkedAt: checkedAt)
         Thread.sleep(forTimeInterval: TimeInterval(options.interval))
     }
 }

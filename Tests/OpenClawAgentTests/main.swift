@@ -19,8 +19,14 @@ func check(_ label: String, _ ok: Bool, _ detail: String = "") {
     if !ok { failures.append(label) }
 }
 
-func verdict(_ out: String, exit: Int32 = 0, timedOut: Bool = false) -> ProbeVerdict {
+func observation(_ out: String, exit: Int32 = 0, timedOut: Bool = false) -> ProbeObservation {
     Probe.parseProbe(.init(stdout: out, exitCode: exit, timedOut: timedOut))
+}
+
+/// The verdict of an observed probe; nil when the probe went unobserved.
+func verdict(_ out: String, exit: Int32 = 0, timedOut: Bool = false) -> ProbeVerdict? {
+    guard case .observed(let v) = observation(out, exit: exit, timedOut: timedOut) else { return nil }
+    return v
 }
 
 let root = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -34,32 +40,58 @@ do {
     // "not reachable" contains "reachable" — if the positive test ran first
     // (or the negative one were dropped) this would read as OK.
     let v1 = verdict("Gateway not reachable.\n", exit: 0)
-    check("not reachable → down", v1 == .down, "\(v1)")
+    check("not reachable → down", v1 == .down, "\(String(describing: v1))")
     let v2 = verdict("gateway unreachable: ECONNREFUSED\n", exit: 0)
-    check("unreachable → down", v2 == .down, "\(v2)")
+    check("unreachable → down", v2 == .down, "\(String(describing: v2))")
 
     let v3 = verdict("Gateway reachable.\n- Telegram default: enabled, disconnected\n")
-    check("disconnected 만 → ok", v3 == .ok(detail: "정상"), "\(v3)")
+    check("disconnected 만 → ok", v3 == .ok(detail: "정상"), "\(String(describing: v3))")
 
     let v4 = verdict("Gateway reachable.\n- Telegram default: enabled, stopped\n- Slack main: running\n")
-    check("stopped → degraded + 채널 이름", v4 == .degraded(detail: "Telegram default"), "\(v4)")
+    check("stopped → degraded + 채널 이름", v4 == .degraded(detail: "Telegram default"), "\(String(describing: v4))")
     let v5 = verdict("Gateway reachable.\n- Slack main: running, error: token expired\n")
-    check("error: → degraded", v5 == .degraded(detail: "Slack main"), "\(v5)")
+    check("error: → degraded", v5 == .degraded(detail: "Slack main"), "\(String(describing: v5))")
     let v6 = verdict("Gateway reachable.\n- Discord bot: health:not-running\n")
-    check("health:not-running → degraded", v6 == .degraded(detail: "Discord bot"), "\(v6)")
+    check("health:not-running → degraded", v6 == .degraded(detail: "Discord bot"), "\(String(describing: v6))")
 
     let v7 = verdict("Gateway reachable.\n- Telegram default: enabled, running, connected\n")
-    check("running → ok + 채널 이름", v7 == .ok(detail: "Telegram default"), "\(v7)")
+    check("running → ok + 채널 이름", v7 == .ok(detail: "Telegram default"), "\(String(describing: v7))")
 
     let v8 = verdict("Gateway reachable.\n- Telegram default: running\n", timedOut: true)
-    check("타임아웃 → down (출력이 정상이어도)", v8 == .down, "\(v8)")
+    check("타임아웃 → down (출력이 정상이어도)", v8 == .down, "\(String(describing: v8))")
 
     let v9 = verdict("Gateway reachable.\n", exit: 0)
-    check("채널 없음 + exit 0 + reachable → ok(채널 없음)", v9 == .ok(detail: "채널 없음"), "\(v9)")
+    check("채널 없음 + exit 0 + reachable → ok(채널 없음)", v9 == .ok(detail: "채널 없음"), "\(String(describing: v9))")
     let v10 = verdict("Gateway reachable.\n", exit: 1)
-    check("채널 없음 + exit≠0 → down", v10 == .down, "\(v10)")
-    let v11 = verdict("", exit: 0)
-    check("빈 출력 → down", v11 == .down, "\(v11)")
+    check("채널 없음 + exit≠0 → down", v10 == .down, "\(String(describing: v10))")
+    let v12 = verdict("openclaw: failed to load config\n", exit: 1)
+    check("해석 불가 문구 + exit≠0 → down (관측됨)", v12 == .down, "\(String(describing: v12))")
+    let v13 = verdict("", exit: 0, timedOut: true)
+    check("출력 없는 타임아웃 → down (관측 실패 아님)", v13 == .down, "\(String(describing: v13))")
+}
+
+// MARK: - 관측 실패
+
+print("▸ 관측 실패")
+do {
+    // Empty output is the agent failing to hear openclaw (fd exhaustion once
+    // did exactly this), not the gateway being down — judged `down`, it
+    // restarted a healthy gateway every 10 minutes.
+    func isUnobserved(_ o: ProbeObservation) -> Bool {
+        if case .unobserved = o { return true }
+        return false
+    }
+    let empty = observation("", exit: 0)
+    check("빈 출력 → 관측 실패", isUnobserved(empty), "\(empty)")
+    let blank = observation(" \n\t\n", exit: 1)
+    check("공백만 → 관측 실패", isUnobserved(blank), "\(blank)")
+    let launchFailed = observation("", exit: -1)
+    check("실행 실패 → 관측 실패 + 사유", launchFailed == .unobserved(reason: "openclaw 실행 실패"),
+          "\(launchFailed)")
+    let missing = Probe.run("/nonexistent/openclaw", [], timeout: 1)
+    check("없는 경로 실행 → exit -1, 출력 없음, timedOut 아님",
+          missing.exitCode == -1 && missing.stdout.isEmpty && !missing.timedOut,
+          "\(missing.exitCode) \(missing.timedOut)")
 }
 
 // MARK: - 공개 detail 필터
@@ -69,17 +101,17 @@ do {
     // The status file is public; a bot handle must never reach it verbatim,
     // and filtering must not change the verdict itself.
     let bot = verdict("Gateway reachable.\n- @mongshell_bot: running\n")
-    check("봇 계정명 → 개수만", bot == .ok(detail: "채널 1개"), "\(bot)")
+    check("봇 계정명 → 개수만", bot == .ok(detail: "채널 1개"), "\(String(describing: bot))")
     let mixed = verdict("Gateway reachable.\n- Telegram default: stopped\n- me@example.com: stopped\n")
-    check("허용 이름만 노출 + 나머지 개수", mixed == .degraded(detail: "Telegram default 외 1개"), "\(mixed)")
+    check("허용 이름만 노출 + 나머지 개수", mixed == .degraded(detail: "Telegram default 외 1개"), "\(String(describing: mixed))")
     let long = String(repeating: "a", count: Probe.maxPublicNameLength + 1)
     let tooLong = verdict("Gateway reachable.\n- \(long): running\n")
-    check("32자 초과 → 개수만", tooLong == .ok(detail: "채널 1개"), "\(tooLong)")
+    check("32자 초과 → 개수만", tooLong == .ok(detail: "채널 1개"), "\(String(describing: tooLong))")
     let edge = String(repeating: "a", count: Probe.maxPublicNameLength)
     let atLimit = verdict("Gateway reachable.\n- \(edge): running\n")
-    check("32자 → 그대로", atLimit == .ok(detail: edge), "\(atLimit)")
+    check("32자 → 그대로", atLimit == .ok(detail: edge), "\(String(describing: atLimit))")
     let hangul = verdict("Gateway reachable.\n- 텔레그램 기본_1.x-y: running\n")
-    check("한글·허용 기호 → 그대로", hangul == .ok(detail: "텔레그램 기본_1.x-y"), "\(hangul)")
+    check("한글·허용 기호 → 그대로", hangul == .ok(detail: "텔레그램 기본_1.x-y"), "\(String(describing: hangul))")
 }
 
 // MARK: - run() 타임아웃
@@ -93,6 +125,67 @@ do {
     check("데드라인 근처에서 끊김", elapsed < 3, String(format: "%.2fs", elapsed))
     let fine = Probe.run("/bin/echo", ["hi"], timeout: 5)
     check("정상 종료는 timedOut 아님", !fine.timedOut && fine.exitCode == 0 && fine.stdout == "hi\n")
+}
+
+// MARK: - run() 자손 프로세스
+
+print("▸ run() 자손 프로세스")
+do {
+    /// First line of `out` as a pid.
+    func firstPid(_ out: String) -> pid_t? {
+        out.split(whereSeparator: \.isNewline).first.flatMap { pid_t($0) }
+    }
+    /// Waits briefly for `pid` to disappear: a killed orphan is a zombie until
+    /// launchd reaps it, and `kill(pid, 0)` still succeeds on a zombie.
+    func isGone(_ pid: pid_t, within limit: TimeInterval = 2) -> Bool {
+        let until = Date().addingTimeInterval(limit)
+        while Date() < until {
+            if kill(pid, 0) == -1 && errno == ESRCH { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return false
+    }
+
+    // openclaw re-executes itself with inherited stdio, so the process doing
+    // the work is a grandchild holding the pipe. Killing only the direct child
+    // left it running — and the read waiting for it.
+    let started = Date()
+    let hung = Probe.run("/bin/sh", ["-c", "sleep 30 & echo $!; wait"], timeout: 1)
+    let elapsed = Date().timeIntervalSince(started)
+    let grandchild = firstPid(hung.stdout)
+    check("손자가 쥔 파이프 — timedOut", hung.timedOut)
+    check("손자가 쥔 파이프 — 마감 안에 반환", elapsed < 4, String(format: "%.2fs", elapsed))
+    check("타임아웃 시 손자도 종료", grandchild.map { isGone($0) } ?? false,
+          "pid \(grandchild.map(String.init) ?? "읽지 못함")")
+    if let grandchild { kill(grandchild, SIGKILL) }
+
+    // A straggler left behind by a child that exited on its own is cleaned up
+    // right away, instead of holding the read open until the deadline.
+    let leftStarted = Date()
+    let left = Probe.run("/bin/sh", ["-c", "sleep 30 & echo $!"], timeout: 5)
+    let leftElapsed = Date().timeIntervalSince(leftStarted)
+    let straggler = firstPid(left.stdout)
+    check("정상 종료 후 남은 자손 — 즉시 반환", !left.timedOut && left.exitCode == 0 && leftElapsed < 2,
+          String(format: "%.2fs", leftElapsed))
+    check("정상 종료 후 남은 자손도 종료", straggler.map { isGone($0) } ?? false,
+          "pid \(straggler.map(String.init) ?? "읽지 못함")")
+    if let straggler { kill(straggler, SIGKILL) }
+
+    // A descendant that escapes the group (its own session) can't be killed
+    // by the runner and keeps the pipe open; the read must still give up at
+    // the overall deadline instead of waiting for it.
+    let escapeStarted = Date()
+    let escaped = Probe.run(
+        "/bin/sh", ["-c", #"perl -MPOSIX -e '$|=1; setsid(); print "$$\n"; sleep 30' & wait"#],
+        timeout: 1)
+    let escapeElapsed = Date().timeIntervalSince(escapeStarted)
+    let escapee = firstPid(escaped.stdout)
+    let deadline = 1 + Probe.killGrace + Probe.readGrace
+    check("그룹을 빠져나간 자손 — 마감 근처에서 반환",
+          escapeElapsed >= deadline - 0.5 && escapeElapsed < deadline + 1.5,
+          String(format: "%.2fs (마감 %.1fs)", escapeElapsed, deadline))
+    check("그룹을 빠져나간 자손 — 그때까지의 출력은 받음", escapee != nil, escaped.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+    if let escapee { kill(escapee, SIGKILL) }
 }
 
 // MARK: - run() fd 누수
