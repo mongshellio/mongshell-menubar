@@ -95,6 +95,28 @@ do {
     check("정상 종료는 timedOut 아님", !fine.timedOut && fine.exitCode == 0 && fine.stdout == "hi\n")
 }
 
+// MARK: - run() fd 누수
+
+print("▸ run() fd 누수")
+do {
+    // The agent probes forever in one process; a single fd leaked per run hit
+    // the fd limit after ~44h, and from then on every probe read empty output
+    // and judged a healthy gateway down. No autoreleasepool here on purpose —
+    // the agent must not depend on autorelease to give pipe ends back.
+    // Lists only the fds actually open, so the cost doesn't scale with
+    // `ulimit -n`. The listing itself holds one fd, equally in both counts.
+    func openFDCount() -> Int {
+        (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count) ?? -1
+    }
+    let runs = 300
+    let allowedGrowth = 5
+    let before = openFDCount()
+    check("열린 fd 목록을 읽을 수 있음", before > 0, "결과 \(before)")
+    for _ in 0..<runs { _ = Probe.run("/bin/echo", ["x"], timeout: 5) }
+    let growth = openFDCount() - before
+    check("\(runs)회 실행해도 fd 가 쌓이지 않음", growth <= allowedGrowth, "증가 \(growth)")
+}
+
 // MARK: - HealTracker
 
 print("▸ HealTracker")

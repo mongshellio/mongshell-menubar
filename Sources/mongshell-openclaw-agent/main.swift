@@ -119,50 +119,54 @@ if options.gatewayLabel == options.selfLabel {
 }
 
 while true {
-    var verdict = Probe.probe()
+    // Top-level code has no run loop to drain autoreleased Foundation objects
+    // (Process, Pipe, FileHandle…), so each iteration drains its own pool.
+    autoreleasepool {
+        var verdict = Probe.probe()
 
-    if options.autoHeal {
-        tracker.record(verdict)
-        let now = Date()
-        if tracker.isHealDue(now: now) {
-            let label = Launchd.gatewayLabel(
-                explicit: options.gatewayLabel, selfLabel: options.selfLabel,
-                in: Launchd.userLaunchAgentsDir)
-            let ok = Launchd.kickstart(label: label)
-            tracker.markHealed(at: now)
-            lastHeal = HealRecord(at: now, ok: ok, reason: verdict.healthName)
-            log("복구 시도 — \(label) kickstart \(ok ? "성공" : "실패") (원인: \(describe(verdict)))")
-
-            Thread.sleep(forTimeInterval: postHealSettle)
-            verdict = Probe.probe()
-            // Counted like any probe (as the app's post-heal refresh is); the
-            // cooldown just set keeps it from triggering another heal.
+        if options.autoHeal {
             tracker.record(verdict)
+            let now = Date()
+            if tracker.isHealDue(now: now) {
+                let label = Launchd.gatewayLabel(
+                    explicit: options.gatewayLabel, selfLabel: options.selfLabel,
+                    in: Launchd.userLaunchAgentsDir)
+                let ok = Launchd.kickstart(label: label)
+                tracker.markHealed(at: now)
+                lastHeal = HealRecord(at: now, ok: ok, reason: verdict.healthName)
+                log("복구 시도 — \(label) kickstart \(ok ? "성공" : "실패") (원인: \(describe(verdict)))")
+
+                Thread.sleep(forTimeInterval: postHealSettle)
+                verdict = Probe.probe()
+                // Counted like any probe (as the app's post-heal refresh is); the
+                // cooldown just set keeps it from triggering another heal.
+                tracker.record(verdict)
+            }
         }
-    }
 
-    let host = HostRules.judge(power: HostProbe.readPower(), disk: HostProbe.readDisk())
+        let host = HostRules.judge(power: HostProbe.readPower(), disk: HostProbe.readDisk())
 
-    let status = AgentStatus(
-        checkedAt: Date(), verdict: verdict, intervalSeconds: options.interval,
-        autoHeal: options.autoHeal, lastHeal: lastHeal, host: host)
-    do {
-        try StatusFile.write(status, to: options.statusFile)
-    } catch {
-        log("상태 파일 쓰기 실패 — \(error.localizedDescription)")
-    }
+        let status = AgentStatus(
+            checkedAt: Date(), verdict: verdict, intervalSeconds: options.interval,
+            autoHeal: options.autoHeal, lastHeal: lastHeal, host: host)
+        do {
+            try StatusFile.write(status, to: options.statusFile)
+        } catch {
+            log("상태 파일 쓰기 실패 — \(error.localizedDescription)")
+        }
 
-    if verdict != lastLogged {
-        log("상태: \(describe(verdict))")
-        lastLogged = verdict
-    }
-    // Per signal, not the overall level: power going bad while the disk
-    // already holds the overall level at warning is still a line.
-    let hostLevels = HostSignalLevels(host)
-    if hostLevels != lastLoggedHostLevels {
-        log("호스트: \(describe(host))")
-        lastLoggedHostLevels = hostLevels
-    }
+        if verdict != lastLogged {
+            log("상태: \(describe(verdict))")
+            lastLogged = verdict
+        }
+        // Per signal, not the overall level: power going bad while the disk
+        // already holds the overall level at warning is still a line.
+        let hostLevels = HostSignalLevels(host)
+        if hostLevels != lastLoggedHostLevels {
+            log("호스트: \(describe(host))")
+            lastLoggedHostLevels = hostLevels
+        }
 
-    Thread.sleep(forTimeInterval: TimeInterval(options.interval))
+        Thread.sleep(forTimeInterval: TimeInterval(options.interval))
+    }
 }
