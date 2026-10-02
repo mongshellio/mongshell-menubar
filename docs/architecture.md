@@ -23,7 +23,7 @@ non_goals:
 | 설정 영속화 | `UserDefaults` (`@AppStorage`) |
 | 알림 | UserNotifications (앱 번들 필수) |
 | 로그인 항목 | ServiceManagement (`SMAppService.mainApp`) |
-| 외부 프로세스 | Foundation `Process` — `openclaw` CLI, `launchctl` (서버 에이전트 전용 — 메뉴바 앱은 셸아웃하지 않는다) |
+| 외부 프로세스 | `posix_spawn` (새 프로세스 그룹, 마감 있는 non-blocking 읽기) — `openclaw` CLI, `launchctl` (서버 에이전트 전용 — 메뉴바 앱은 셸아웃하지 않는다) |
 | 호스트 신호 읽기 (서버 에이전트) | IOKit (`IOKit.ps` — 전원 공급원·내장 배터리), Foundation `URL` 리소스 값 (홈 볼륨 여유 공간) |
 | 상태 공개 (서버 에이전트) | Tailscale Funnel — 오픈소스판 `tailscaled` 가 상태 파일을 정적 서빙 (포트 8443) |
 | 외부 패키지 의존성 | **없음** |
@@ -75,8 +75,9 @@ UsageModel.pollLoop()  ──(@MainActor, Task)
 
 ```
 [서버 맥] mongshell-openclaw-agent  ──(LaunchAgent, 기본 60초 주기)
-   └─ Probe → Process: `openclaw channels status --probe`
+   └─ Probe → posix_spawn: `openclaw channels status --probe`  (새 프로세스 그룹, 8초 초과 시 그룹 SIGTERM → 1초 → SIGKILL, 출력 읽기는 최대 10초)
         └─ 파싱 → ok / degraded / down  (공개 detail 은 허용 문자 필터 통과분만)
+        └─ 실행 실패·빈 출력 → 관측 실패: 게시·복구 카운트 없이 주기만큼 대기 후 종료(exit 75) → KeepAlive 재기동. 복구 직후 재확인이면 복구 전 판정으로 한 번 쓰고 종료 — 쿨다운 보존
    └─ 자동복구: 2회 연속 실패 + 쿨다운 600초 → launchctl kickstart -k <게이트웨이 레이블>
    └─ HostProbe → IOKit 전원 정보 + 홈 볼륨 여유 공간  (읽기만)
         └─ HostRules → 신호별·종합 ok / warning / critical  (읽을 신호가 없으면 host = null)

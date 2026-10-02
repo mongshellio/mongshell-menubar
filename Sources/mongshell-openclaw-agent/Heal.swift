@@ -72,6 +72,6 @@ enum Launchd {
     static func kickstart(label: String) -> Bool {
         let target = "gui/\(getuid())/\(label)"
         let result = Probe.run(launchctlPath, ["kickstart", "-k", target], timeout: kickstartTimeout)
-        return !result.timedOut && result.exitCode == 0
+        return !result.timedOut && result.termination == .exited(status: 0)
     }
 }
