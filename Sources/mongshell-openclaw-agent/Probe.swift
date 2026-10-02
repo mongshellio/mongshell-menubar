@@ -166,9 +166,13 @@ enum Probe {
             }
         }
 
-        // Not exited even after the SIGKILL (stuck in the kernel): it's left
-        // unreaped rather than risk a blocking wait, and stays a zombie until
-        // the agent process itself is restarted.
+        // `.unknown` covers every case without a status to read: reaped
+        // elsewhere (ECHILD), a failed reap, or not exited even after the
+        // SIGKILL (stuck in the kernel) — that last one is left unreaped rather
+        // than risk a blocking wait, and stays a zombie until the agent process
+        // itself is restarted. `parseProbe` then can't credit a clean exit, so a
+        // channel-less "Gateway reachable." reads as down; ECHILD only happens
+        // if something else reaps our children, which nothing here does.
         let termination = reapable ? reap(pid) : .unknown
         return RunResult(stdout: String(decoding: output, as: UTF8.self),
                          termination: termination, timedOut: timedOut)
