@@ -59,9 +59,17 @@ enum Probe {
         proc.standardOutput = pipe
         proc.standardError = pipe
 
+        // The read end is closed explicitly, not left to deallocation (Process
+        // already closes the parent's write end after launch; on launch failure
+        // both ends are closed here). The agent's loop runs headless for weeks,
+        // and one leaked fd per probe once hit the process fd limit — after
+        // which every probe read empty output and a healthy gateway was judged
+        // down.
         do {
             try proc.run()
         } catch {
+            try? pipe.fileHandleForReading.close()
+            try? pipe.fileHandleForWriting.close()
             return RunResult(stdout: "", exitCode: -1, timedOut: false)
         }
 
@@ -85,6 +93,7 @@ enum Probe {
 
         // The write end is closed now (process dead), so this returns promptly.
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        try? pipe.fileHandleForReading.close()
         proc.waitUntilExit()
         let out = String(data: data, encoding: .utf8) ?? ""
         return RunResult(stdout: out, exitCode: proc.terminationStatus, timedOut: timedOut)
