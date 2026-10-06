@@ -192,7 +192,8 @@ struct PopoverView: View {
         switch model.loadState {
         case .loaded:      return (Palette.onlineDot, "연결됨")
         case .loading:     return (Palette.textTertiary, "동기화 중")
-        case .signedOut:   return (Palette.textTertiary, "샘플")
+        case .signedOut, .sessionExpired:
+                           return (Palette.textTertiary, "샘플")
         case .rateLimited: return (Palette.amber, "제한됨")
         case .error:       return (Palette.red, "오류")
         }
@@ -224,11 +225,10 @@ struct PopoverView: View {
         switch model.loadState {
         case .signedOut:
             banner(text: "샘플 데이터 표시 중 — 로그인하면 실제 사용량이 보여요",
-                   tint: Palette.amber) {
-                Button("로그인") { Task { await model.signIn() } }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-            }
+                   tint: Palette.amber) { signInButton }
+        case .sessionExpired:
+            banner(text: "로그인이 만료되었어요 — 다시 로그인하면 실제 사용량이 보여요",
+                   tint: Palette.amber) { signInButton }
         case .loading:
             banner(text: "불러오는 중…", tint: Palette.textSecondary) { EmptyView() }
         case .rateLimited:
@@ -246,6 +246,12 @@ struct PopoverView: View {
                 EmptyView()
             }
         }
+    }
+
+    private var signInButton: some View {
+        Button("로그인") { Task { await model.signIn() } }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
     }
 
     private func banner<Trailing: View>(text: String, tint: Color,

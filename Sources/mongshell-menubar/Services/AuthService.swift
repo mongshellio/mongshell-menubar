@@ -2,23 +2,6 @@ import Foundation
 import CryptoKit
 import AppKit
 
-enum AuthError: LocalizedError {
-    case notConfigured
-    case cancelled
-    case invalidCallback
-    case tokenExchangeFailed(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .notConfigured: return "OAuth 설정이 없습니다."
-        case .cancelled: return "로그인이 취소되었습니다."
-        case .invalidCallback: return "붙여넣은 코드를 해석할 수 없습니다."
-        case .tokenExchangeFailed(let detail):
-            return "토큰 발급에 실패했습니다. \(detail)"
-        }
-    }
-}
-
 /// OAuth 2.0 Authorization Code + PKCE, using Claude Code's own client.
 ///
 /// Claude Code's registered redirect is a console callback page that displays
@@ -159,7 +142,7 @@ final class AuthService: NSObject {
             // Log the ERROR body only (never a success body — it holds tokens).
             let bodyText = String(data: data, encoding: .utf8) ?? ""
             Self.debugLog("token status=\(status) body=\(bodyText.prefix(300))")
-            throw AuthError.tokenExchangeFailed("(\(status)) \(bodyText.prefix(160))")
+            throw AuthError.tokenError(status: status, body: data)
         }
 
         var expires: Date?

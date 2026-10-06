@@ -50,7 +50,7 @@ final class UsageModel: ObservableObject {
 
     private func refreshOnce() async {
         guard let (initialToken, source) = currentToken() else {
-            loadState = .signedOut
+            markSignedOut()
             snapshot = .sample
             return
         }
@@ -58,10 +58,17 @@ final class UsageModel: ObservableObject {
         if case .signedOut = loadState { loadState = .loading }
 
         // Refresh our own expired token up front.
-        if source == .oauthLogin, token.isExpired,
-           let refreshed = try? await auth.refresh(token) {
-            CredentialStore.saveOwnToken(refreshed)
-            token = refreshed
+        if source == .oauthLogin, token.isExpired {
+            switch await renewOwnToken(token) {
+            case .renewed(let renewed):
+                CredentialStore.saveOwnToken(renewed)
+                token = renewed
+            case .sessionExpired:
+                expireSession()
+                return
+            case .transientFailure:
+                break
+            }
         }
 
         do {
@@ -72,19 +79,64 @@ final class UsageModel: ObservableObject {
             maybeNotify(percent: snap.fiveHourPercent)
         } catch APIError.unauthorized {
             // Own token: try one refresh. CLI token: re-read (Claude Code may have rotated it).
-            if source == .oauthLogin, let refreshed = try? await auth.refresh(token) {
-                CredentialStore.saveOwnToken(refreshed)
-                if let snap = try? await api.fetch(token: refreshed) {
-                    snapshot = snap; loadState = .loaded(source); backoff = 0; return
+            if source == .oauthLogin {
+                switch await renewOwnToken(token) {
+                case .renewed(let renewed):
+                    CredentialStore.saveOwnToken(renewed)
+                    if let snap = try? await api.fetch(token: renewed) {
+                        snapshot = snap; loadState = .loaded(source); backoff = 0; return
+                    }
+                case .sessionExpired:
+                    expireSession()
+                    return
+                case .transientFailure:
+                    break
                 }
             }
-            loadState = .signedOut
+            markSignedOut()
         } catch APIError.rateLimited(let retry) {
             backoff = min(backoff + 1, 4)
             loadState = .rateLimited(retryAfter: retry)
         } catch {
             loadState = .error("사용량을 불러오지 못했습니다")
         }
+    }
+
+    private enum OwnTokenRenewal {
+        case renewed(OAuthToken)
+        /// The server rejected the refresh token for good — keeping it only
+        /// buys a 400 every poll and blocks the CLI-token fallback.
+        case sessionExpired
+        /// Network or server trouble; the token may still be fine, so keep it.
+        case transientFailure
+    }
+
+    private func renewOwnToken(_ token: OAuthToken) async -> OwnTokenRenewal {
+        do {
+            return .renewed(try await auth.refresh(token))
+        } catch AuthError.invalidGrant {
+            return .sessionExpired
+        } catch {
+            return .transientFailure
+        }
+    }
+
+    /// Drops the dead own token so the next poll falls through to the CLI
+    /// token (or to signed-out), and tells the user once. No repeat guard is
+    /// needed: with the token gone, nothing can reach this path again until
+    /// the user signs in anew.
+    private func expireSession() {
+        CredentialStore.clearOwnToken()
+        snapshot = .sample
+        loadState = .sessionExpired
+        notifySessionExpired()
+    }
+
+    /// `sessionExpired` outranks `signedOut`: the banner that explains why the
+    /// numbers went back to sample must survive the polls that follow (no
+    /// token at all, or a CLI token that 401s) until the user acts.
+    private func markSignedOut() {
+        if loadState != .sessionExpired { loadState = .signedOut }
     }
 
     // MARK: Sign in / out
@@ -114,6 +166,23 @@ final class UsageModel: ObservableObject {
     private func requestNotificationAuth() {
         guard notificationsAvailable else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    /// Not tied to `notifyThresholds`: that toggle is about usage levels, and
+    /// this is a rare, action-required event of a different kind. Asks for
+    /// permission on the spot in case the threshold prompt never ran.
+    private func notifySessionExpired() {
+        guard notificationsAvailable else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Claude 로그인이 만료되었습니다"
+        content.body = "메뉴바 아이콘을 눌러 다시 로그인하세요."
+        let request = UNNotificationRequest(identifier: "mongshell-menubar-session-expired",
+                                            content: content, trigger: nil)
+        Task {
+            let center = UNUserNotificationCenter.current()
+            guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true else { return }
+            try? await center.add(request)
+        }
     }
 
     private func maybeNotify(percent: Int) {

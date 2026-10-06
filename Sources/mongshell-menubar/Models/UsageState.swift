@@ -61,6 +61,10 @@ enum DataSource: Equatable {
 /// Auth/connection state for the popover.
 enum LoadState: Equatable {
     case signedOut
+    /// Was signed in with the app's own OAuth, but the server stopped honouring
+    /// the refresh token (`invalid_grant`). Distinct from `signedOut` — "never
+    /// signed in" and "the login lapsed" ask for different wording.
+    case sessionExpired
     case loading
     case loaded(DataSource)
     case rateLimited(retryAfter: TimeInterval?)
