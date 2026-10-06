@@ -15,14 +15,23 @@ final class AuthService: NSObject {
         guard !Config.oauthClientID.isEmpty else { throw AuthError.notConfigured }
         // Seamless loopback first; fall back to manual code paste if the
         // browser never returns (e.g. loopback redirect not honored).
+        var token: OAuthToken
         do {
-            return try await signInLoopback()
+            token = try await signInLoopback()
         } catch is CancellationError {
             throw AuthError.cancelled
         } catch {
-            Self.debugLog("loopback failed (\(error)); falling back to manual paste")
-            return try await signInManual()
+            AuthDebugLog.write("loopback failed (\(error)); falling back to manual paste")
+            do {
+                token = try await signInManual()
+            } catch let error as AuthError {
+                AuthDebugLog.write("sign-in fail \(error.logSummary)")
+                throw error
+            }
         }
+        token.signedInAt = Date()
+        AuthDebugLog.write("sign-in ok expires=\(AuthDebugLog.iso(token.expiresAt))")
+        return token
     }
 
     private func authorizeURL(redirectURI: String, verifier: String, showCode: Bool) -> URL {
@@ -82,15 +91,29 @@ final class AuthService: NSObject {
         return try await exchange(code: code, verifier: verifier, redirectURI: Config.oauthRedirectURI)
     }
 
+    /// The renewed token inherits `signedInAt`: the endpoint only knows about
+    /// this refresh, not the sign-in that started the session.
     func refresh(_ token: OAuthToken) async throws -> OAuthToken {
         guard let refresh = token.refreshToken, !Config.oauthClientID.isEmpty else {
             throw AuthError.tokenExchangeFailed("refresh token 없음")
         }
-        return try await postToken([
-            "grant_type": "refresh_token",
-            "refresh_token": refresh,
-            "client_id": Config.oauthClientID
-        ])
+        let session = AuthDebugLog.session(token)
+        do {
+            var renewed = try await postToken([
+                "grant_type": "refresh_token",
+                "refresh_token": refresh,
+                "client_id": Config.oauthClientID
+            ])
+            renewed.signedInAt = token.signedInAt
+            AuthDebugLog.write("refresh ok expires=\(AuthDebugLog.iso(renewed.expiresAt)) \(session)")
+            return renewed
+        } catch let error as AuthError {
+            AuthDebugLog.write("refresh fail \(error.logSummary) \(session)")
+            throw error
+        } catch {
+            AuthDebugLog.write("refresh fail transport=\(error) \(session)")
+            throw error
+        }
     }
 
     // MARK: - Manual code entry
@@ -139,9 +162,6 @@ final class AuthService: NSObject {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let access = json["access_token"] as? String
         else {
-            // Log the ERROR body only (never a success body — it holds tokens).
-            let bodyText = String(data: data, encoding: .utf8) ?? ""
-            Self.debugLog("token status=\(status) body=\(bodyText.prefix(300))")
             throw AuthError.tokenError(status: status, body: data)
         }
 
@@ -150,16 +170,6 @@ final class AuthService: NSObject {
         return OAuthToken(accessToken: access,
                           refreshToken: json["refresh_token"] as? String,
                           expiresAt: expires)
-    }
-
-    private static func debugLog(_ msg: String) {
-        let line = "[\(Config.userAgent)] \(msg)\n"
-        let url = URL(fileURLWithPath: "/tmp/mongshell-menubar_auth.log")
-        if let h = try? FileHandle(forWritingTo: url) {
-            h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close()
-        } else {
-            try? Data(line.utf8).write(to: url)
-        }
     }
 
     // MARK: - PKCE

@@ -66,6 +66,7 @@ echo "▶ running openclaw client tests"
 # with just the token type and the constants it needs.
 echo "▶ compiling auth tests"
 swiftc -o "$OUT/auth-tests" \
+  "$APP/Services/AuthDebugLog.swift" \
   "$APP/Services/AuthError.swift" \
   "$APP/Services/Config.swift" \
   "$APP/Services/Credentials.swift" \

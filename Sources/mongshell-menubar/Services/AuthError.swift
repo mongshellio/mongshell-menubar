@@ -27,12 +27,32 @@ enum AuthError: LocalizedError {
     /// retry: the refresh token is dead server-side and every further attempt
     /// is another 400. Everything else (network, 5xx, unknown body) is
     /// reported as a plain exchange failure so the caller keeps the token.
+    ///
+    /// The detail names only the `error` field when the body is the standard
+    /// OAuth error shape, and falls back to a body prefix otherwise — it ends
+    /// up in the diagnostic log and in the user-facing message.
     static func tokenError(status: Int, body: Data) -> AuthError {
         let fields = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
         if status == 400, fields?["error"] as? String == "invalid_grant" {
             return .invalidGrant(fields?["error_description"] as? String ?? "")
         }
+        if let error = fields?["error"] as? String {
+            return .tokenExchangeFailed("status=\(status) error=\(error)")
+        }
         let bodyText = String(data: body, encoding: .utf8) ?? ""
-        return .tokenExchangeFailed("(\(status)) \(bodyText.prefix(160))")
+        return .tokenExchangeFailed("status=\(status) body=\(bodyText.prefix(160))")
+    }
+
+    /// One-line form for the diagnostic log. Carries no token material.
+    var logSummary: String {
+        switch self {
+        case .invalidGrant(let description):
+            return "status=400 error=invalid_grant"
+                + (description.isEmpty ? "" : " (\(description))")
+        case .tokenExchangeFailed(let detail):
+            return detail
+        case .notConfigured, .cancelled, .invalidCallback:
+            return String(describing: self)
+        }
     }
 }

@@ -46,4 +46,8 @@ enum Config {
     static let ownKeychainAccount = "oauth"
 
     static let minPollInterval: Int = 180
+
+    /// Append-only OAuth diagnostics (`AuthDebugLog`). In /tmp on purpose: it is
+    /// a debugging aid, not user data, and should not outlive a reboot.
+    static let authDebugLogURL = URL(fileURLWithPath: "/tmp/mongshell-menubar_auth.log")
 }

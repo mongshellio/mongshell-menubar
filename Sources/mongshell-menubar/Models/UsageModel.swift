@@ -73,7 +73,7 @@ final class UsageModel: ObservableObject {
                 CredentialStore.saveOwnToken(renewed)
                 token = renewed
             case .sessionExpired:
-                expireSession()
+                expireSession(token)
                 return
             case .transientFailure:
                 break
@@ -87,6 +87,7 @@ final class UsageModel: ObservableObject {
             backoff = 0
             maybeNotify(percent: snap.fiveHourPercent)
         } catch APIError.unauthorized {
+            AuthDebugLog.write("usage 401 source=\(source)")
             // Own token: try one refresh. CLI token: re-read (Claude Code may have rotated it).
             if source == .oauthLogin {
                 switch await renewOwnToken(token) {
@@ -96,7 +97,7 @@ final class UsageModel: ObservableObject {
                         snapshot = snap; loadState = .loaded(source); backoff = 0; return
                     }
                 case .sessionExpired:
-                    expireSession()
+                    expireSession(token)
                     return
                 case .transientFailure:
                     break
@@ -134,7 +135,8 @@ final class UsageModel: ObservableObject {
     /// token (or to signed-out), and tells the user once. No repeat guard is
     /// needed: with the token gone, nothing can reach this path again until
     /// the user signs in anew.
-    private func expireSession() {
+    private func expireSession(_ token: OAuthToken) {
+        AuthDebugLog.write("own token discarded (invalid_grant) \(AuthDebugLog.session(token))")
         CredentialStore.clearOwnToken()
         snapshot = .sample
         loadState = .sessionExpired

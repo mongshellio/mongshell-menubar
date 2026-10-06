@@ -6,6 +6,10 @@ struct OAuthToken: Codable, Equatable {
     var accessToken: String
     var refreshToken: String?
     var expiresAt: Date?
+    /// When the user signed in through the app's own OAuth; carried across
+    /// refreshes so a lapsed login can be dated. Optional so Keychain items
+    /// written before this field existed still decode. nil for CLI tokens.
+    var signedInAt: Date?
 
     var isExpired: Bool {
         guard let expiresAt else { return false }
