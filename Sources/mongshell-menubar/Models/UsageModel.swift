@@ -19,8 +19,15 @@ final class UsageModel: ObservableObject {
     /// The refresh token is single-use and rotates on every refresh, so two
     /// overlapping `refreshOnce` runs (poll loop + the popover's "새로고침")
     /// can each spend it and sign the user out. `@MainActor` makes this plain
-    /// flag a sufficient guard.
+    /// flag a sufficient guard within this process only; a race with another
+    /// instance (a stale dev build left running after `make_app.sh`) is
+    /// stopped by `ownTokenStillCurrent` instead.
     private var refreshInFlight = false
+    /// A refresh asked for while one was running. Dropping it would leave
+    /// stale state on screen until the next poll — e.g. the expired-session
+    /// banner after `signIn()` succeeded mid-poll — so the running refresh
+    /// goes round once more instead.
+    private var refreshRequested = false
 
     // MARK: Lifecycle
 
@@ -53,11 +60,20 @@ final class UsageModel: ObservableObject {
 
     // MARK: Refresh
 
+    /// Satisfies one refresh request. Requests that arrive while a refresh is
+    /// in flight are coalesced into a single follow-up run, however many
+    /// there were.
     private func refreshOnce() async {
-        guard !refreshInFlight else { return }
+        guard !refreshInFlight else { refreshRequested = true; return }
         refreshInFlight = true
         defer { refreshInFlight = false }
+        repeat {
+            refreshRequested = false
+            await performRefresh()
+        } while refreshRequested
+    }
 
+    private func performRefresh() async {
         guard let (initialToken, source) = currentToken() else {
             markSignedOut()
             snapshot = .sample
@@ -70,6 +86,7 @@ final class UsageModel: ObservableObject {
         if source == .oauthLogin, token.isExpired {
             switch await renewOwnToken(token) {
             case .renewed(let renewed):
+                guard ownTokenStillCurrent(token) else { return }
                 CredentialStore.saveOwnToken(renewed)
                 token = renewed
             case .sessionExpired:
@@ -92,6 +109,7 @@ final class UsageModel: ObservableObject {
             if source == .oauthLogin {
                 switch await renewOwnToken(token) {
                 case .renewed(let renewed):
+                    guard ownTokenStillCurrent(token) else { return }
                     CredentialStore.saveOwnToken(renewed)
                     if let snap = try? await api.fetch(token: renewed) {
                         snapshot = snap; loadState = .loaded(source); backoff = 0; return
@@ -136,11 +154,23 @@ final class UsageModel: ObservableObject {
     /// needed: with the token gone, nothing can reach this path again until
     /// the user signs in anew.
     private func expireSession(_ token: OAuthToken) {
+        guard ownTokenStillCurrent(token) else { return }
         AuthDebugLog.write("own token discarded (invalid_grant) \(AuthDebugLog.session(token))")
         CredentialStore.clearOwnToken()
         snapshot = .sample
         loadState = .sessionExpired
         notifySessionExpired()
+    }
+
+    /// Guards every write to the own token. The poll may be renewing or
+    /// discarding a token that `signIn()` — or another instance of this app —
+    /// has replaced in the meantime; acting on the stale one would overwrite
+    /// or delete the fresh login. When the Keychain has moved on the caller
+    /// leaves it alone and the next poll re-reads it.
+    private func ownTokenStillCurrent(_ token: OAuthToken) -> Bool {
+        if CredentialStore.loadOwnToken()?.refreshToken == token.refreshToken { return true }
+        AuthDebugLog.write("own token changed elsewhere; kept")
+        return false
     }
 
     /// `sessionExpired` outranks `signedOut`: the banner that explains why the
