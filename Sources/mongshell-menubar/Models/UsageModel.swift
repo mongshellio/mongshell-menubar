@@ -16,6 +16,11 @@ final class UsageModel: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var backoff: Int = 0
     private var lastNotifiedLevel = 0
+    /// The refresh token is single-use and rotates on every refresh, so two
+    /// overlapping `refreshOnce` runs (poll loop + the popover's "새로고침")
+    /// can each spend it and sign the user out. `@MainActor` makes this plain
+    /// flag a sufficient guard.
+    private var refreshInFlight = false
 
     // MARK: Lifecycle
 
@@ -49,6 +54,10 @@ final class UsageModel: ObservableObject {
     // MARK: Refresh
 
     private func refreshOnce() async {
+        guard !refreshInFlight else { return }
+        refreshInFlight = true
+        defer { refreshInFlight = false }
+
         guard let (initialToken, source) = currentToken() else {
             markSignedOut()
             snapshot = .sample
