@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs the regression tests: Claude Code settings, the openclaw server agent,
-# the app's openclaw status client, then server/install.sh's option rules.
+# the app's openclaw status client, the OAuth token path, then
+# server/install.sh's option rules.
 #
 # Not `swift test`: that needs XCTest or swift-testing, and neither ships with
 # the Command Line Tools this project builds against (no Xcode required is a
@@ -59,6 +60,20 @@ swiftc -o "$OUT/client-tests" \
 
 echo "▶ running openclaw client tests"
 "$OUT/client-tests"
+
+# AuthService itself pulls in AppKit, the loopback server and the Keychain, so
+# the token-endpoint classification lives in its own file and is compiled here
+# with just the token type and the constants it needs.
+echo "▶ compiling auth tests"
+swiftc -o "$OUT/auth-tests" \
+  "$APP/Services/AuthDebugLog.swift" \
+  "$APP/Services/AuthError.swift" \
+  "$APP/Services/Config.swift" \
+  "$APP/Services/Credentials.swift" \
+  "$ROOT/Tests/AuthTests/main.swift"
+
+echo "▶ running auth tests"
+"$OUT/auth-tests"
 
 # Plain bash: sources the real server/lib.sh, exits non-zero on any failure.
 echo "▶ running server install option tests"

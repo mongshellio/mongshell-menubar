@@ -46,4 +46,12 @@ enum Config {
     static let ownKeychainAccount = "oauth"
 
     static let minPollInterval: Int = 180
+
+    /// Append-only OAuth diagnostics (`AuthDebugLog`). A debugging aid, not
+    /// user data, so it lives in the per-user temporary directory ($TMPDIR —
+    /// mode 0700, emptied on reboot) rather than the shared /tmp: that one is
+    /// world-readable, and a fixed path there can be pre-planted as a symlink
+    /// by any local user to redirect our appends.
+    static let authDebugLogURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("mongshell-menubar_auth.log")
 }
