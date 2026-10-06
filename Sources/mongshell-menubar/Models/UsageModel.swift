@@ -28,6 +28,12 @@ final class UsageModel: ObservableObject {
     /// banner after `signIn()` succeeded mid-poll — so the running refresh
     /// goes round once more instead.
     private var refreshRequested = false
+    /// The "login lapsed" notice is showing and the user has not acted on it.
+    /// Kept apart from `loadState`, which tracks the current connection:
+    /// folding the two into one enum was why a single 429 or transport error
+    /// could overwrite the notice and let the next CLI 401 downgrade it to a
+    /// plain `signedOut`.
+    private var sessionExpiredUnresolved = false
 
     // MARK: Lifecycle
 
@@ -99,9 +105,7 @@ final class UsageModel: ObservableObject {
 
         do {
             let snap = try await api.fetch(token: token)
-            snapshot = snap
-            loadState = .loaded(source)
-            backoff = 0
+            markLoaded(snap, source: source)
             maybeNotify(percent: snap.fiveHourPercent)
         } catch APIError.unauthorized {
             AuthDebugLog.write("usage 401 source=\(source)")
@@ -112,7 +116,8 @@ final class UsageModel: ObservableObject {
                     guard ownTokenStillCurrent(token) else { return }
                     CredentialStore.saveOwnToken(renewed)
                     if let snap = try? await api.fetch(token: renewed) {
-                        snapshot = snap; loadState = .loaded(source); backoff = 0; return
+                        markLoaded(snap, source: source)
+                        return
                     }
                 case .sessionExpired:
                     expireSession(token)
@@ -128,6 +133,15 @@ final class UsageModel: ObservableObject {
         } catch {
             loadState = .error("사용량을 불러오지 못했습니다")
         }
+    }
+
+    /// A successful fetch is the one thing that resolves a lapsed login on
+    /// its own: it proves whichever token we hold now works.
+    private func markLoaded(_ snap: UsageSnapshot, source: DataSource) {
+        snapshot = snap
+        loadState = .loaded(source)
+        backoff = 0
+        sessionExpiredUnresolved = false
     }
 
     private enum OwnTokenRenewal {
@@ -158,6 +172,7 @@ final class UsageModel: ObservableObject {
         AuthDebugLog.write("own token discarded (invalid_grant) \(AuthDebugLog.session(token))")
         CredentialStore.clearOwnToken()
         snapshot = .sample
+        sessionExpiredUnresolved = true
         loadState = .sessionExpired
         notifySessionExpired()
     }
@@ -175,9 +190,10 @@ final class UsageModel: ObservableObject {
 
     /// `sessionExpired` outranks `signedOut`: the banner that explains why the
     /// numbers went back to sample must survive the polls that follow (no
-    /// token at all, or a CLI token that 401s) until the user acts.
+    /// token at all, or a CLI token that 401s) until the user acts. Only
+    /// restores the state — the notification was sent once in `expireSession`.
     private func markSignedOut() {
-        if loadState != .sessionExpired { loadState = .signedOut }
+        loadState = sessionExpiredUnresolved ? .sessionExpired : .signedOut
     }
 
     // MARK: Sign in / out
@@ -186,6 +202,7 @@ final class UsageModel: ObservableObject {
         do {
             let token = try await auth.signIn()
             CredentialStore.saveOwnToken(token)
+            sessionExpiredUnresolved = false
             await refreshOnce()
         } catch {
             loadState = .error((error as? LocalizedError)?.errorDescription ?? "로그인 실패")
@@ -194,6 +211,7 @@ final class UsageModel: ObservableObject {
 
     func signOut() {
         CredentialStore.clearOwnToken()
+        sessionExpiredUnresolved = false
         loadState = .signedOut
         snapshot = .sample
     }
