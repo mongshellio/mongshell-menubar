@@ -98,6 +98,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--line); paddi
 .pr.hov { background: rgba(0,0,0,.035); }
 .pr .top { display: flex; justify-content: space-between; font-size: 11px; color: var(--p-text2); font-variant-numeric: tabular-nums; }
 .pr .top .repo b { font-weight: 600; color: var(--p-text2); }
+.pr .top .repo .num { font-weight: 600; color: var(--p-text1); }
 .pr .ttl { font-size: 13.5px; font-weight: 500; color: var(--p-text1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pr .bot { display: flex; align-items: center; gap: 5px; }
 .checks { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
@@ -120,7 +121,7 @@ code { font-family: var(--mono); font-size: 12px; background: var(--line); paddi
 .badge.line.green { color: #2C7A4F; } .badge.line.amber { color: #9A6A12; } .badge.line.red { color: var(--p-red); }
 .merged { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--p-text2); }
 .merged .m { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.merged .m b { font-weight: 500; color: var(--p-text3); }
+.merged .m b { font-weight: 600; color: var(--p-text1); }
 .merged .w { color: var(--p-text3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .foot { display: flex; justify-content: space-between; padding: 11px 18px; font-size: 12px; color: var(--p-text2); }
 .foot .r { color: var(--p-text3); }
@@ -280,13 +281,13 @@ ol.dec li span { color: var(--muted); }
             <div class="sec">
               <div class="sh"><span class="a">리뷰 요청</span><span class="b">2건</span></div>
               <div class="pr">
-                <div class="top"><span class="repo">mongshell/<b>bookdam</b> #58</span><span>어제</span></div>
+                <div class="top"><span class="repo">mongshell/<b>bookdam</b> <span class="num">#58</span></span><span>어제</span></div>
                 <div class="ttl">feat: 대화 목록 무한 스크롤과 날짜 구분선</div>
                 <div class="bot"><span class="badge fill amber"><svg class="ico-eye"></svg>내 리뷰 대기</span></div>
                 <div class="checks"><span class="chk ok"><svg class="ico-check"></svg>검사 5개 통과 <em>7m 51s</em></span></div>
               </div>
               <div class="pr">
-                <div class="top"><span class="repo">mongshell/<b>growdle</b> #121</span><span>3시간 전</span></div>
+                <div class="top"><span class="repo">mongshell/<b>growdle</b> <span class="num">#121</span></span><span>3시간 전</span></div>
                 <div class="ttl">fix: 주간 리포트 집계가 UTC 자정에 끊기던 문제</div>
                 <div class="bot"><span class="badge fill amber"><svg class="ico-eye"></svg>내 리뷰 대기</span><span class="badge line amber"><svg class="ico-dot"></svg>검사 진행중</span></div>
                 <div class="checks"><span class="chk ok"><svg class="ico-check"></svg>static <em>1m 12s</em></span><span class="chk run"><svg class="ico-dot"></svg>test <em data-elapsed="83"></em></span><span class="chk skip"><svg class="ico-skip"></svg>automerge</span><span class="chk run"><svg class="ico-dot"></svg>Vercel <em data-elapsed="125"></em></span><span class="chk ok"><svg class="ico-check"></svg>Preview Comments <em>4s</em></span></div>
@@ -297,25 +298,25 @@ ol.dec li span { color: var(--muted); }
             <div class="sec">
               <div class="sh"><span class="a">내 PR</span><span class="b">4건 · 막힘 1</span></div>
               <div class="pr hov">
-                <div class="top"><span class="repo">mongshell/<b>mongshell-menubar</b> #45</span><span>25분 전</span></div>
+                <div class="top"><span class="repo">mongshell/<b>mongshell-menubar</b> <span class="num">#45</span></span><span>25분 전</span></div>
                 <div class="ttl">feat: GitHub PR 영역을 메뉴바 두 번째 영역으로</div>
                 <div class="bot"><span class="badge fill red"><svg class="ico-x"></svg>검사 실패</span><span class="badge line"><svg class="ico-eye"></svg>리뷰 대기</span></div>
                 <div class="checks"><span class="chk fail"><svg class="ico-x"></svg>build <em>48s</em></span><span class="chk run"><svg class="ico-dot"></svg>test <em data-elapsed="83"></em></span><span class="chk ok"><svg class="ico-check"></svg>snapshot <em>31s</em></span></div>
               </div>
               <div class="pr">
-                <div class="top"><span class="repo">mongshell/<b>mongshell-menubar</b> #46</span><span>1시간 전</span></div>
+                <div class="top"><span class="repo">mongshell/<b>mongshell-menubar</b> <span class="num">#46</span></span><span>1시간 전</span></div>
                 <div class="ttl">docs: PHILOSOPHY 에 옵트인 두 번째 영역 예외 추가</div>
                 <div class="bot"><span class="badge fill grey"><svg class="ico-draft"></svg>Draft</span></div>
                 <div class="checks"><span class="chk ok"><svg class="ico-check"></svg>검사 3개 통과 <em>2m 40s</em></span></div>
               </div>
               <div class="pr">
-                <div class="top"><span class="repo">mongshell/<b>bookdam</b> #57</span><span>2일 전</span></div>
+                <div class="top"><span class="repo">mongshell/<b>bookdam</b> <span class="num">#57</span></span><span>2일 전</span></div>
                 <div class="ttl">refactor: auth 라우트의 세션 조회를 미들웨어로</div>
                 <div class="bot"><span class="badge fill green"><svg class="ico-merge"></svg>머지 가능</span><span class="badge line green"><svg class="ico-check"></svg>승인</span></div>
                 <div class="checks"><span class="chk ok"><svg class="ico-check"></svg>검사 5개 통과 <em>6m 12s</em></span></div>
               </div>
               <div class="pr">
-                <div class="top"><span class="repo">mongshell/<b>bookdam</b> #55</span><span>4일 전</span></div>
+                <div class="top"><span class="repo">mongshell/<b>bookdam</b> <span class="num">#55</span></span><span>4일 전</span></div>
                 <div class="ttl">feat: 대화 내보내기 (markdown)</div>
                 <div class="bot"><span class="badge fill grey"><svg class="ico-eye"></svg>리뷰 대기</span></div>
                 <div class="checks"><span class="chk ok"><svg class="ico-check"></svg>검사 4개 통과 <em>5m 58s</em></span><span class="chk skip"><svg class="ico-skip"></svg>automerge</span></div>
