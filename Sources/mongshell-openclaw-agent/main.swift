@@ -25,6 +25,8 @@ struct Options {
     var interval = defaultInterval
     var autoHeal = true
     var selfLabel = defaultSelfLabel
+    /// Published as `agentVersion`; nil when absent or not publishable.
+    var buildVersion: String?
 }
 
 let usage = """
@@ -34,6 +36,7 @@ let usage = """
       --interval <sec>         probe 주기, 초 (기본 \(Options.defaultInterval), \(Options.minimumInterval)~\(Options.maximumInterval))
       --no-auto-heal           자동복구 끄기
       --self-label <label>     이 에이전트의 launchd 레이블 (기본 \(Options.defaultSelfLabel))
+      --build-version <v>      상태 파일에 실을 빌드 버전 (install.sh 가 git 에서 정해 넘긴다)
     """
 
 func fail(_ message: String) -> Never {
@@ -47,6 +50,7 @@ func parseOptions(_ args: [String]) -> Options {
     var interval = Options.defaultInterval
     var autoHeal = true
     var selfLabel = Options.defaultSelfLabel
+    var buildVersion: String?
 
     var it = args.makeIterator()
     func value(for flag: String) -> String {
@@ -67,6 +71,10 @@ func parseOptions(_ args: [String]) -> Options {
             autoHeal = false
         case "--self-label":
             selfLabel = value(for: arg)
+        case "--build-version":
+            // Unpublishable → logged at startup and left out, not fatal: a
+            // bad stamp must not stop the watchdog.
+            buildVersion = value(for: arg)
         case "-h", "--help":
             print(usage)
             exit(0)
@@ -76,7 +84,8 @@ func parseOptions(_ args: [String]) -> Options {
     }
     guard let statusFile else { fail("--status-file 은 필수입니다") }
     return Options(statusFile: statusFile, gatewayLabel: gatewayLabel,
-                   interval: interval, autoHeal: autoHeal, selfLabel: selfLabel)
+                   interval: interval, autoHeal: autoHeal, selfLabel: selfLabel,
+                   buildVersion: buildVersion)
 }
 
 // MARK: Logging
@@ -120,7 +129,11 @@ var lastLoggedHostLevels: HostSignalLevels?
 /// Timeout is logged on the first of a run of timed-out probes only.
 var lastProbeTimedOut = false
 
-log("시작 — status-file=\(options.statusFile.path) interval=\(options.interval)s autoHeal=\(options.autoHeal)")
+let agentVersion = AgentStatus.publishableVersion(options.buildVersion)
+log("시작 — version=\(agentVersion ?? "없음") status-file=\(options.statusFile.path) interval=\(options.interval)s autoHeal=\(options.autoHeal)")
+if let raw = options.buildVersion, agentVersion == nil {
+    log("경고: --build-version 값이 형식에 맞지 않아 싣지 않습니다 (\(raw.count)자)")
+}
 if options.gatewayLabel == options.selfLabel {
     log("경고: --gateway-label 이 자기 레이블(\(options.selfLabel))이라 무시하고 자동 탐색합니다")
 }
@@ -154,7 +167,7 @@ if options.gatewayLabel == options.selfLabel {
 
     let status = AgentStatus(
         checkedAt: checkedAt, verdict: verdict, intervalSeconds: options.interval,
-        autoHeal: options.autoHeal, lastHeal: lastHeal, host: host)
+        autoHeal: options.autoHeal, lastHeal: lastHeal, host: host, agentVersion: agentVersion)
     do {
         try StatusFile.write(status, to: options.statusFile)
     } catch {

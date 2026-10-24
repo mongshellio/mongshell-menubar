@@ -150,12 +150,20 @@ struct PopoverView: View {
     /// Both server sections come from that one document, so this sits once,
     /// under the last of them. Read-only by design (Decision #25): restarts
     /// happen on the server.
+    /// The agent's version (Decision #81) sits under the time, not beside it:
+    /// a stale time plus a version would crowd the button.
     private var serverCheckedRow: some View {
         HStack(spacing: 8) {
-            Text(openClaw.checkedClockText.map { "서버 확인 \($0)" } ?? "서버 확인 기록 없음")
-                .font(.system(size: 11))
-                .monospacedDigit()
-                .foregroundStyle(Palette.textTertiary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(openClaw.checkedClockText.map { "서버 확인 \($0)" } ?? "서버 확인 기록 없음")
+                if let version = openClaw.agentVersionText {
+                    Text(version)
+                        .lineLimit(1)
+                }
+            }
+            .font(.system(size: 11))
+            .monospacedDigit()
+            .foregroundStyle(Palette.textTertiary)
             Spacer(minLength: 8)
             Button("새로고침") { openClaw.refreshNow() }
                 .buttonStyle(.bordered)

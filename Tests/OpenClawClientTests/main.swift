@@ -106,6 +106,15 @@ do {
           slow == .down(detail: "응답 지연 · \(Int(Probe.probeTimeout))초 초과")
               && slow?.settingsLabel == "게이트웨이 다운 — 응답 지연 · \(Int(Probe.probeTimeout))초 초과",
           "\(String(describing: slow))")
+
+    // Issue #81: the build version reaches the app as written.
+    let versionedData = try! StatusFile.encode(AgentStatus(
+        checkedAt: now, verdict: .ok(detail: "정상"), intervalSeconds: 60, autoHeal: true,
+        lastHeal: nil, host: nil, agentVersion: "v1.2.0+3"))
+    check("agentVersion 왕복",
+          (try? OpenClawStatusClient.parse(data: versionedData))?.agentVersion == "v1.2.0+3")
+    check("agentVersion null 왕복 → nil",
+          (try? OpenClawStatusClient.parse(data: okData))?.agentVersion == nil)
 }
 
 // MARK: - 관대한 디코딩
@@ -113,6 +122,20 @@ do {
 print("▸ 관대한 디코딩")
 do {
     let base = #""checkedAt":"\#(iso(now))","intervalSeconds":60"#
+
+    // An older agent sends no key; a broken one may send anything.
+    let noVersion = try? parse(#"{\#(base),"health":"ok"}"#).get()
+    check("agentVersion 누락 → nil", noVersion != nil && noVersion?.agentVersion == nil)
+    let numberVersion = try? parse(#"{\#(base),"health":"ok","agentVersion":12}"#).get()
+    check("agentVersion 이 숫자 → nil", numberVersion?.agentVersion == nil)
+    let blankVersion = try? parse(#"{\#(base),"health":"ok","agentVersion":"  "}"#).get()
+    check("agentVersion 공백뿐 → nil", blankVersion?.agentVersion == nil)
+    let longVersion = try? parse(
+        #"{\#(base),"health":"ok","agentVersion":"v1.2.0\#(String(repeating: "0", count: 60))\nx"}"#).get()
+    check("agentVersion 은 한 줄로 펴고 상한으로 자름",
+          longVersion?.agentVersion?.count == OpenClawStatusClient.agentVersionDisplayLimit
+              && longVersion?.agentVersion?.contains("\n") == false,
+          "\(String(describing: longVersion?.agentVersion))")
 
     if case .failure(let e) = parse(#"{"schema":1,"health":"ok","detail":"x"}"#) {
         check("checkedAt 누락 → missingCheckedAt", e == .missingCheckedAt, "\(e)")

@@ -75,6 +75,27 @@ rm -f "$WORK/pwned"
 resolve "interval=\$(touch $WORK/pwned)\n" "" "" >/dev/null
 check "파일 내용을 실행하지 않음" "absent" "$([[ -e "$WORK/pwned" ]] && echo present || echo absent)"
 
+echo "▸ 에이전트 버전 (git describe)"
+# The developer's own git config (commit/tag signing, editors) must not reach
+# these throwaway repos.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+REPO="$WORK/repo"
+git init -q "$REPO"
+commit() { git -C "$REPO" -c user.name=t -c user.email=t@t commit -q --allow-empty -m "$1"; }
+commit first
+check "tag 없음 → 빈 값" "" "$(agent_version "$REPO")"
+git -C "$REPO" tag v1.2.0
+check "tag 위 → v1.2.0" "v1.2.0" "$(agent_version "$REPO")"
+commit second
+check "tag 뒤 1커밋 → v1.2.0+1" "v1.2.0+1" "$(agent_version "$REPO")"
+commit third
+check "커밋이 늘면 값이 바뀜 → v1.2.0+2" "v1.2.0+2" "$(agent_version "$REPO")"
+git -C "$REPO" tag build-marker
+check "v* 가 아닌 tag 는 무시" "v1.2.0+2" "$(agent_version "$REPO")"
+git -C "$REPO" tag v1.3.0-rc-1
+check "하이픈 든 tag 이름" "v1.3.0-rc-1" "$(agent_version "$REPO")"
+check "repo 아님 → 빈 값" "" "$(agent_version "$WORK/nowhere")"
+
 echo ""
 if [[ ${#FAILURES[@]} -eq 0 ]]; then
   echo "✓ $CASES cases passed"

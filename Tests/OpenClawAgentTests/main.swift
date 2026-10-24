@@ -719,12 +719,37 @@ do {
         runners: RunnersReading(running: 4, total: 4))
     let status = AgentStatus(
         checkedAt: at, verdict: .ok(detail: "Telegram default"),
-        intervalSeconds: 60, autoHeal: true, lastHeal: heal, host: host)
+        intervalSeconds: 60, autoHeal: true, lastHeal: heal, host: host,
+        agentVersion: "v1.2.0+3")
 
     let json = try! JSONSerialization.jsonObject(with: StatusFile.encode(status)) as! [String: Any]
     check("키 집합", Set(json.keys) == ["schema", "checkedAt", "health", "detail",
-                                        "intervalSeconds", "autoHeal", "lastHeal", "host"],
+                                        "intervalSeconds", "autoHeal", "lastHeal", "host",
+                                        "agentVersion"],
           "\(json.keys.sorted())")
+    check("agentVersion 값", json["agentVersion"] as? String == "v1.2.0+3",
+          "\(json["agentVersion"] ?? "nil")")
+    let unversioned = AgentStatus(checkedAt: at, verdict: .down, intervalSeconds: 60,
+                                  autoHeal: true, lastHeal: nil, host: nil)
+    let unversionedJSON = try! JSONSerialization.jsonObject(
+        with: StatusFile.encode(unversioned)) as! [String: Any]
+    check("버전 없음 → agentVersion 은 명시적 null", unversionedJSON["agentVersion"] is NSNull)
+
+    // install.sh's format passes; anything that could carry more than a
+    // version (paths, spaces, markup, an overlong token) stays out of the
+    // public document.
+    check("버전 허용: tag", AgentStatus.publishableVersion("v1.2.0") == "v1.2.0")
+    check("버전 허용: tag+N", AgentStatus.publishableVersion("v1.2.0+3") == "v1.2.0+3")
+    check("버전 허용: 하이픈 tag", AgentStatus.publishableVersion("v1.3.0-rc-1+2") == "v1.3.0-rc-1+2")
+    check("버전 거부: nil·빈 값",
+          AgentStatus.publishableVersion(nil) == nil && AgentStatus.publishableVersion("") == nil)
+    check("버전 거부: 경로", AgentStatus.publishableVersion("/Users/me/v1") == nil)
+    check("버전 거부: 공백·개행", AgentStatus.publishableVersion("v1 2") == nil
+              && AgentStatus.publishableVersion("v1\n") == nil)
+    check("버전 거부: 한글", AgentStatus.publishableVersion("v1-서버") == nil)
+    check("버전 경계: 32자 허용 · 33자 거부",
+          AgentStatus.publishableVersion(String(repeating: "1", count: 32)) != nil
+              && AgentStatus.publishableVersion(String(repeating: "1", count: 33)) == nil)
     check("schema = 1", json["schema"] as? Int == 1)
     check("checkedAt ISO8601 UTC", json["checkedAt"] as? String == "2026-09-29T03:12:45Z",
           "\(json["checkedAt"] ?? "nil")")

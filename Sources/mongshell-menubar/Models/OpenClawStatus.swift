@@ -18,6 +18,9 @@ struct OpenClawStatus: Equatable, Sendable {
     /// The server host's power, disk and CI runner verdicts. nil = the agent sent none
     /// (an older agent, or no signal could be read).
     let host: ServerHost?
+    /// The agent's build ("v1.2.0+3", Decision #81). nil = absent — an older
+    /// agent, or one installed without a version.
+    var agentVersion: String? = nil
 }
 
 /// The agent's most recent hard-restart attempt.

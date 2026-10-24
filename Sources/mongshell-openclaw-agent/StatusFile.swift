@@ -11,12 +11,31 @@ struct HealRecord: Codable, Equatable {
 /// The JSON document `tailscale funnel` serves to the menubar clients.
 /// Deliberately small: no PID, no raw probe output — this is public over HTTPS
 /// (behind only an unguessable path), so it carries the verdicts and the
-/// figures they were judged from (battery percent, free bytes), and nothing
-/// that identifies the machine: no host name, no path, no version.
+/// figures they were judged from (battery percent, free bytes), the agent's
+/// own build version (Decision #81), and nothing that identifies the machine:
+/// no host name, no path, no openclaw or OS version.
 struct AgentStatus: Encodable {
     /// Stays 1 when keys are added (`host`, Decision #31; `host.runners`,
-    /// #75) — clients ignore keys they don't know.
+    /// #75; `agentVersion`, #81) — clients ignore keys they don't know.
     static let schemaVersion = 1
+
+    /// Longest build version published.
+    static let maxVersionLength = 32
+
+    /// `raw` when it looks like what `install.sh` derives from git
+    /// (`v1.2.0`, `v1.2.0+3`), else nil. It comes from the command line and
+    /// the document is public, so only `[0-9A-Za-z.+-]` goes out.
+    static func publishableVersion(_ raw: String?) -> String? {
+        guard let raw, (1...maxVersionLength).contains(raw.count) else { return nil }
+        let allowed = raw.unicodeScalars.allSatisfy { s in
+            switch s.value {
+            case 0x30...0x39, 0x41...0x5A, 0x61...0x7A: return true // ASCII alnum
+            case 0x2B, 0x2D, 0x2E: return true // + - .
+            default: return false
+            }
+        }
+        return allowed ? raw : nil
+    }
 
     let checkedAt: Date
     let verdict: ProbeVerdict
@@ -25,12 +44,16 @@ struct AgentStatus: Encodable {
     let lastHeal: HealRecord?
     /// nil when no host signal could be read.
     let host: HostStatus?
+    /// The build `install.sh` stamped (already through `publishableVersion`);
+    /// nil when it couldn't tell, or for a binary run by hand.
+    var agentVersion: String? = nil
 
     private enum CodingKeys: String, CodingKey {
-        case schema, checkedAt, health, detail, intervalSeconds, autoHeal, lastHeal, host
+        case schema, checkedAt, health, detail, intervalSeconds, autoHeal, lastHeal, host,
+             agentVersion
     }
 
-    /// Hand-written so `detail` / `lastHeal` / `host` are emitted as explicit
+    /// Hand-written so `detail` / `lastHeal` / `host` / `agentVersion` are emitted as explicit
     /// `null` instead of being dropped — clients see a stable key set.
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -42,6 +65,7 @@ struct AgentStatus: Encodable {
         try c.encode(autoHeal, forKey: .autoHeal)
         try c.encode(lastHeal, forKey: .lastHeal)
         try c.encode(host, forKey: .host)
+        try c.encode(agentVersion, forKey: .agentVersion)
     }
 }
 

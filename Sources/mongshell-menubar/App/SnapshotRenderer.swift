@@ -231,11 +231,13 @@ private extension OpenClawReading {
         var reading = OpenClawReading()
         reading.recordSuccess(OpenClawStatus(
             checkedAt: now.addingTimeInterval(-40), health: .ok(detail: "Telegram default"),
-            intervalSeconds: 60, autoHeal: true, lastHeal: nil, host: host), receivedAt: now)
+            intervalSeconds: 60, autoHeal: true, lastHeal: nil, host: host,
+            agentVersion: "v1.2.0+3"), receivedAt: now)
         return reading
     }
 
-    /// The server reports the gateway down and says why.
+    /// The server reports the gateway down and says why. Sent no version, as
+    /// an older agent does — the version line is left out.
     static func snapshotDown(now: Date) -> OpenClawReading {
         var reading = OpenClawReading()
         reading.recordSuccess(OpenClawStatus(
@@ -249,7 +251,8 @@ private extension OpenClawReading {
         var reading = OpenClawReading()
         reading.recordSuccess(OpenClawStatus(
             checkedAt: now.addingTimeInterval(-23 * 60), health: .ok(detail: "Telegram default"),
-            intervalSeconds: 60, autoHeal: true, lastHeal: nil, host: host), receivedAt: now)
+            intervalSeconds: 60, autoHeal: true, lastHeal: nil, host: host,
+            agentVersion: "v1.2.0+3"), receivedAt: now)
         reading.recordFailure(.offline)
         return reading
     }

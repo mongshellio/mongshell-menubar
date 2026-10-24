@@ -166,6 +166,12 @@ fi
 
 # ── 4. 빌드·배치 ───────────────────────────────────────────────────────────
 step "에이전트 빌드 (release)"
+AGENT_VERSION="$(agent_version "$ROOT")"
+if [[ -n "$AGENT_VERSION" ]]; then
+  echo "  버전 $AGENT_VERSION"
+else
+  warn "git 에서 버전을 정하지 못했습니다 (v* tag 없음?) — 버전 없이 설치합니다"
+fi
 swift build -c release --product "$PRODUCT" --package-path "$ROOT"
 BUILT="$(swift build -c release --package-path "$ROOT" --show-bin-path)/$PRODUCT"
 [[ -x "$BUILT" ]] || die "빌드 산출물을 찾지 못했습니다: $BUILT"
@@ -210,6 +216,11 @@ EXTRA_ARGS="    <string>--interval</string>
 "
 if [[ $AUTO_HEAL -eq 0 ]]; then
   EXTRA_ARGS+="    <string>--no-auto-heal</string>
+"
+fi
+if [[ -n "$AGENT_VERSION" ]]; then
+  EXTRA_ARGS+="    <string>--build-version</string>
+    <string>$(xml_escape "$AGENT_VERSION")</string>
 "
 fi
 

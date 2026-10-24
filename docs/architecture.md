@@ -87,7 +87,7 @@ UsageModel.pollLoop()  ──(@MainActor, Task)
    └─ HostProbe → IOKit 전원 정보 + 홈 볼륨 여유 공간 + CI 러너 (LaunchDaemon plist 개수, 레이블별 launchctl print)  (읽기만)
         └─ HostRules → 신호별·종합 ok / warning / critical  (읽을 신호가 없으면 host = null)
    └─ status.json 원자적 쓰기 (0644)
-        { schema, checkedAt, health, detail, intervalSeconds, autoHeal, lastHeal, host }
+        { schema, checkedAt, health, detail, intervalSeconds, autoHeal, lastHeal, host, agentVersion }
         host = { health, power: { health, pluggedIn, charging, batteryPercent } | null,
                  disk: { health, availableBytes } | null,
                  runners: { health, running, total } | null } | null
@@ -114,6 +114,8 @@ UsageModel.pollLoop()  ──(@MainActor, Task)
 - HTTP 404 는 연락 두절이되 "주소 또는 토큰이 맞지 않습니다" 로 구분한다. 에러 문구에 URL(=토큰)을 넣지 않는다.
 - 앱은 읽기 전용이다 — 재시작·자동복구·로그는 서버 몫이다.
 
+**에이전트 버전 (`agentVersion`, Decision #81).** `install.sh` 가 빌드할 소스에서 `git describe --tags --match 'v[0-9]*' --long` 으로 정해 `--build-version` 으로 넘긴다 — 릴리스 tag 위면 `v1.2.0`, 그 뒤로 커밋이 N개면 `v1.2.0+N` (해시 없음). 에이전트는 `[0-9A-Za-z.+-]` 1–32자만 싣고, 정하지 못했거나 형식이 틀리면 `null` 이다. 앱은 문자열을 한 줄로 펴고 32자로 잘라 팝오버 "서버 확인" 시각 아래에 `에이전트 v1.2.0+3` 으로 보이며, 값이 없으면(구버전 에이전트 포함) 그 줄을 그리지 않는다. 버전은 표시 전용 — 어떤 판정에도 쓰지 않는다.
+
 **서버 호스트 신호 (`host`, Decision #31 · CI 러너는 #75).**
 
 | 키 | 값 | 비고 |
@@ -134,7 +136,7 @@ UsageModel.pollLoop()  ──(@MainActor, Task)
 | `host.runners.total` | 1 이상 정수 | 설치된 러너 plist 개수 — 대수는 하드코딩하지 않는다. 레이블·사용자명·경로는 싣지 않는다 |
 
 - **판정은 에이전트에만 있다** (`HostRules`). 앱은 임계값을 갖지 않고 `health` 문자열을 읽어 표시한다. 히스테리시스는 없다.
-- `host` 아래의 문자열 값은 세 레벨 이름뿐이다. 호스트명·경로·버전은 싣지 않는다.
+- `host` 아래의 문자열 값은 세 레벨 이름뿐이다. 호스트명·경로·OS 버전은 싣지 않는다 (에이전트 자신의 빌드 버전은 최상위 `agentVersion`).
 - **앱의 읽기는 관대하다.** `host` 가 없거나 객체가 아니면 서버 점 없이 openclaw 판정만 읽는다. 읽을 수 없는 `health` 값(모르는 문자열, 문자열이 아닌 값)과 `health` 가 빠진 신호는 `warning` 으로 읽는다. `host.health` 가 없거나 `null` 이면 신호 중 가장 나쁜 것이 대신한다. `pluggedIn`·`charging` 은 JSON bool 만, `batteryPercent` 는 0–100 범위의 수만 받고 그 밖의 값은 그 수치만 비운다. `availableBytes` 가 음수이거나 수가 아니면 디스크 신호는 없는 것으로 본다. `host.runners` 는 객체가 아니면 없는 것으로 보고, `running`·`total` 은 0 이상 정수만 받으며, 둘 중 하나라도 쓸 수 없거나 `total` 이 0 이거나 `running > total` 이면 러너 신호는 없는 것으로 본다. `host.health` 가 없을 때의 "가장 나쁜 신호" 에는 러너도 들어간다.
 - **신선도는 openclaw 점과 같은 규칙**이다 (위 연락 두절 판정). 문서가 오래되면 서버 점은 회색이 되고 마지막으로 받은 수치를 흐리게 남긴다. 마지막 성공 응답에 `host` 가 없었거나 성공 응답이 아직 없으면 서버 점을 그리지 않는다 (`.absent`). 두 점은 서로의 값에 영향을 주지 않는다.
 - **표시 위치.** 메뉴바는 openclaw 표시(발자국 + 점) 아래에 서버 글리프 + 점을 쌓는다. 팝오버는 openclaw 섹션 아래에 서버 섹션(상태 한 마디 + 전원 줄 + 디스크 줄 + CI 러너 줄 `CI 러너 3/4`)을 두고, "서버 확인" 시각과 새로고침은 두 섹션 아래에 한 번만 둔다. 서버가 보내지 않은 신호의 줄은 그리지 않는다. 러너 신호는 메뉴바에 새 줄을 만들지 않는다 — 서버 점의 종합 판정에 합쳐진다.

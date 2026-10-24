@@ -114,3 +114,19 @@ resolve_options() {
   INTERVAL="${ARG_INTERVAL:-${SAVED_INTERVAL:-$DEFAULT_INTERVAL}}"
   AUTO_HEAL="${ARG_AUTO_HEAL:-${SAVED_AUTO_HEAL:-$DEFAULT_AUTO_HEAL}}"
 }
+
+# ── 에이전트 버전 (install.sh) ─────────────────────────────────────────────
+# $1=repo 경로. 빌드할 소스의 버전을 출력한다 — 릴리스 tag 위면 "v1.2.0", 그 뒤로
+# 커밋이 N개 있으면 "v1.2.0+N". 해시는 싣지 않지만 커밋이 하나 늘 때마다 값이 바뀐다.
+# tag 가 없거나 git 이 답하지 않으면 아무것도 출력하지 않는다 (호출자가 경고).
+# 작업 트리의 커밋 안 된 수정은 반영하지 않는다.
+agent_version() {
+  local desc
+  desc="$(git -C "$1" describe --tags --match 'v[0-9]*' --long 2>/dev/null)" || return 0
+  [[ "$desc" =~ ^(v.+)-([0-9]+)-g[0-9a-f]+$ ]] || return 0
+  if [[ "${BASH_REMATCH[2]}" == 0 ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  else
+    printf '%s+%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+  fi
+}

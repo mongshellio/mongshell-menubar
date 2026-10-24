@@ -155,7 +155,8 @@ struct OpenClawStatusClient: Sendable {
     ///          "power":{"health":"warning","pluggedIn":false,"charging":false,
     ///                   "batteryPercent":82},
     ///          "disk":{"health":"ok","availableBytes":32604813672},
-    ///          "runners":{"health":"ok","running":4,"total":4}}}
+    ///          "runners":{"health":"ok","running":4,"total":4}},
+    ///  "agentVersion":"v1.2.0+3"}
     /// ```
     /// Lenient like the usage parser (Decision 2): unknown keys are ignored and
     /// a newer `schema` is still attempted. The only hard requirement is a
@@ -175,8 +176,19 @@ struct OpenClawStatusClient: Sendable {
             intervalSeconds: positiveInt(root["intervalSeconds"]),
             autoHeal: root["autoHeal"] as? Bool,
             lastHeal: healEvent(root["lastHeal"]),
-            host: host(root["host"])
+            host: host(root["host"]),
+            agentVersion: agentVersion(root["agentVersion"])
         )
+    }
+
+    /// Longest `agentVersion` shown; the agent publishes at most 32.
+    static let agentVersionDisplayLimit = 32
+
+    /// A non-empty string, flattened and capped — shown as-is, never parsed.
+    private static func agentVersion(_ any: Any?) -> String? {
+        guard let raw = any as? String else { return nil }
+        let text = DisplayText.flatten(raw, limit: agentVersionDisplayLimit)
+        return text.isEmpty ? nil : text
     }
 
     /// Longest unknown `health` value echoed back in the UI.
